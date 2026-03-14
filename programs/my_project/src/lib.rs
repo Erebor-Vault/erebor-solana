@@ -9,6 +9,11 @@ pub mod my_project {
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         msg!("Greetings from: {:?}", ctx.program_id);
+        msg!("Signer: {}", ctx.accounts.signer.key());
+        let counter = &mut ctx.accounts.counter;
+        counter.value = 0;
+        counter.bump = ctx.bumps.counter;
+
         Ok(())
     }
 }
@@ -30,6 +35,7 @@ pub struct Initialize<'info> {
 }
 
 #[account]
+#[derive(InitSpace)]
 pub struct Counter{
     pub value: u64,
     pub bump: u8
