@@ -253,4 +253,431 @@ describe("my_project", () => {
       );
     }
   });
+
+  // ============================================================
+  // VAULT TESTS (Phase 2)
+  // ============================================================
+  // Same patterns as the counter tests above:
+  // - createMint to deploy a token (like above)
+  // - airdrop SOL to test keypairs (like above)
+  // - createAssociatedTokenAccount for user ATAs (like above)
+  // - mintTo to give users tokens (like above)
+  // - PublicKey.findProgramAddressSync to derive PDAs (like counterPdaAddress above)
+  // - program.methods.xxx().accountsStrict().signers().rpc() to call instructions (like above)
+  // - program.account.xxx.fetch() to read on-chain state (like counter.fetch above)
+
+  describe("Vault", () => {
+    // Shared state across vault tests — these get set in "before" or early tests
+    let mint: anchor.web3.PublicKey; // the underlying token (like USDC)
+    let admin: Keypair; // vault admin keypair
+    let user1: Keypair; // test depositor
+    let user1TokenAccount: anchor.web3.PublicKey; // user1's ATA for the underlying token
+    let vaultPda: anchor.web3.PublicKey; // vault state PDA
+    let shareMintPda: anchor.web3.PublicKey; // share token mint PDA
+    let reserveAta: anchor.web3.PublicKey; // vault's reserve ATA
+
+    // Helper: airdrop SOL and confirm — same pattern as the counter test's airdrop block
+    // The payer from Anchor's provider — used for fees throughout tests
+    const payer = (provider.wallet as anchor.Wallet).payer;
+
+    async function airdropAndConfirm(
+      pubkey: anchor.web3.PublicKey,
+      lamports: number
+    ) {
+      const sig = await connection.requestAirdrop(pubkey, lamports);
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash();
+      await connection.confirmTransaction({
+        blockhash,
+        lastValidBlockHeight,
+        signature: sig,
+      });
+    }
+
+    // Helper: mint tokens and confirm — same pattern as the counter test's mintTo block
+    async function mintTokensAndConfirm(
+      tokenMint: anchor.web3.PublicKey,
+      destination: anchor.web3.PublicKey,
+      amount: number
+    ) {
+      const sig = await mintTo(
+        connection,
+        payer,
+        tokenMint,
+        destination,
+        payer,
+        amount
+      );
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash();
+      await connection.confirmTransaction({
+        blockhash,
+        lastValidBlockHeight,
+        signature: sig,
+      });
+    }
+
+    before(async () => {
+      // Setup: same token creation pattern as the counter test
+      admin = Keypair.generate();
+      user1 = Keypair.generate();
+
+      // Airdrop SOL — same as counter test line 49
+      await airdropAndConfirm(admin.publicKey, 2e9);
+      await airdropAndConfirm(user1.publicKey, 2e9);
+
+      // Create underlying token mint (6 decimals, like USDC) — same as counter test line 65
+      mint = await createMint(connection, payer, payer.publicKey, null, 6);
+
+      // Create user1's ATA — same as counter test line 76
+      user1TokenAccount = await createAssociatedTokenAccount(
+        connection,
+        payer,
+        mint,
+        user1.publicKey
+      );
+
+      // Mint 10.0 tokens to user1 — same as counter test line 87
+      await mintTokensAndConfirm(mint, user1TokenAccount, 10_000_000);
+
+      // Derive vault PDA — same pattern as counterPdaAddress derivation (line 121)
+      // but with different seeds: ["vault", mint] instead of ["counter", signer]
+      [vaultPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), mint.toBuffer()],
+        program.programId
+      );
+
+      // Derive share mint PDA — seeds: ["shares", vault_state]
+      [shareMintPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("shares"), vaultPda.toBuffer()],
+        program.programId
+      );
+
+      // Derive reserve ATA — the vault PDA's token account for the underlying mint
+      // This is the same concept as counterPdaTokenAccount (line 156) but for the vault
+      reserveAta = anchor.utils.token.associatedAddress({
+        mint: mint,
+        owner: vaultPda,
+      });
+    });
+
+    it("initialize_vault — creates vault, share mint, and reserve", async () => {
+      // Call initialize_vault — same pattern as program.methods.initialize() (line 131)
+      // but creates 3 accounts (vault_state + share_mint + reserve_ata) instead of 1
+      const tx = await program.methods
+        .initializeVault()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          reserveAta: reserveAta,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      console.log("initialize_vault tx:", tx);
+
+      // Fetch and verify vault state — same as program.account.counter.fetch() (line 146)
+      const vault = await program.account.vaultState.fetch(vaultPda);
+
+      console.log("Vault state:", vault);
+
+      // Verify all fields were set correctly
+      assert.ok(vault.admin.equals(admin.publicKey), "admin should match");
+      assert.ok(
+        vault.authority.equals(admin.publicKey),
+        "authority should default to admin"
+      );
+      assert.ok(vault.tokenMint.equals(mint), "token_mint should match");
+      assert.ok(
+        vault.shareMint.equals(shareMintPda),
+        "share_mint should match"
+      );
+      assert.ok(
+        vault.totalDeposited.eq(new BN(0)),
+        "total_deposited should be 0"
+      );
+
+      // Verify reserve ATA exists and has 0 balance
+      const reserveBalance = await connection.getTokenAccountBalance(
+        reserveAta
+      );
+      assert.ok(+reserveBalance.value.amount === 0, "reserve should be empty");
+
+      console.log("Vault initialized successfully!");
+    });
+
+    it("deposit — first deposit gives 1:1 shares", async () => {
+      const depositAmount = new BN(5_000_000); // 5.0 tokens
+
+      // Derive user1's share ATA — will be created by init_if_needed in the instruction
+      const user1ShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: user1.publicKey,
+      });
+
+      // Call deposit — similar to increment (line 172) but also mints shares
+      await program.methods
+        .deposit(depositAmount)
+        .accountsStrict({
+          user: user1.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          userTokenAccount: user1TokenAccount,
+          reserveAta: reserveAta,
+          userShareToken: user1ShareToken,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([user1])
+        .rpc();
+
+      // Verify vault state updated — same as fetching counter state after increment
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(
+        vault.totalDeposited.eq(depositAmount),
+        "total_deposited should be 5M"
+      );
+
+      // Verify reserve received the tokens — same as checking counterBalanceAfter (line 199)
+      const reserveBalance = await connection.getTokenAccountBalance(
+        reserveAta
+      );
+      assert.ok(
+        +reserveBalance.value.amount === depositAmount.toNumber(),
+        "reserve should have 5M"
+      );
+
+      // Verify user received shares (1:1 for first deposit)
+      const shareBalance = await connection.getTokenAccountBalance(
+        user1ShareToken
+      );
+      assert.ok(
+        +shareBalance.value.amount === depositAmount.toNumber(),
+        "user should have 5M shares (1:1)"
+      );
+
+      // Verify user's token balance decreased
+      const userBalance = await connection.getTokenAccountBalance(
+        user1TokenAccount
+      );
+      assert.ok(
+        +userBalance.value.amount === 10_000_000 - depositAmount.toNumber(),
+        "user should have 5M tokens left"
+      );
+
+      console.log("First deposit: 5M tokens → 5M shares (1:1)");
+    });
+
+    it("deposit — second deposit gives proportional shares", async () => {
+      const depositAmount = new BN(2_000_000); // 2.0 tokens
+
+      const user1ShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: user1.publicKey,
+      });
+
+      // Before: vault has 5M deposited, 5M shares. Ratio is 1:1.
+      // Expected: 2M tokens * 5M shares / 5M deposited = 2M shares
+      await program.methods
+        .deposit(depositAmount)
+        .accountsStrict({
+          user: user1.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          userTokenAccount: user1TokenAccount,
+          reserveAta: reserveAta,
+          userShareToken: user1ShareToken,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([user1])
+        .rpc();
+
+      // Verify totals
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(
+        vault.totalDeposited.eq(new BN(7_000_000)),
+        "total_deposited should be 7M"
+      );
+
+      const reserveBalance = await connection.getTokenAccountBalance(
+        reserveAta
+      );
+      assert.ok(
+        +reserveBalance.value.amount === 7_000_000,
+        "reserve should have 7M"
+      );
+
+      // User should have 5M + 2M = 7M shares total
+      const shareBalance = await connection.getTokenAccountBalance(
+        user1ShareToken
+      );
+      assert.ok(
+        +shareBalance.value.amount === 7_000_000,
+        "user should have 7M shares total"
+      );
+
+      console.log("Second deposit: 2M tokens → 2M shares (still 1:1 ratio)");
+    });
+
+    it("withdraw — burns shares and returns tokens", async () => {
+      const sharesToBurn = new BN(3_000_000); // burn 3M shares
+
+      const user1ShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: user1.publicKey,
+      });
+
+      // Before: vault has 7M deposited, 7M shares. User has 7M shares.
+      // Withdrawing 3M shares: underlying = 3M * 7M / 7M = 3M tokens
+      const userBalanceBefore = await connection.getTokenAccountBalance(
+        user1TokenAccount
+      );
+
+      // Call withdraw — similar to decrement (line 222) but also burns shares
+      await program.methods
+        .withdraw(sharesToBurn)
+        .accountsStrict({
+          user: user1.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          userTokenAccount: user1TokenAccount,
+          reserveAta: reserveAta,
+          userShareToken: user1ShareToken,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user1])
+        .rpc();
+
+      // Verify vault state
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(
+        vault.totalDeposited.eq(new BN(4_000_000)),
+        "total_deposited should be 4M (7M - 3M)"
+      );
+
+      // Verify reserve decreased
+      const reserveBalance = await connection.getTokenAccountBalance(
+        reserveAta
+      );
+      assert.ok(
+        +reserveBalance.value.amount === 4_000_000,
+        "reserve should have 4M"
+      );
+
+      // Verify user got tokens back — same balance check pattern as decrement test (line 243)
+      const userBalanceAfter = await connection.getTokenAccountBalance(
+        user1TokenAccount
+      );
+      assert.ok(
+        Number(userBalanceAfter.value.amount) -
+          Number(userBalanceBefore.value.amount) ===
+          sharesToBurn.toNumber(),
+        "user should have received 3M tokens"
+      );
+
+      // Verify shares burned
+      const shareBalance = await connection.getTokenAccountBalance(
+        user1ShareToken
+      );
+      assert.ok(
+        +shareBalance.value.amount === 4_000_000,
+        "user should have 4M shares left (7M - 3M)"
+      );
+
+      console.log("Withdrew 3M shares → received 3M tokens");
+    });
+
+    it("withdraw — zero shares fails", async () => {
+      const user1ShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: user1.publicKey,
+      });
+
+      try {
+        await program.methods
+          .withdraw(new BN(0))
+          .accountsStrict({
+            user: user1.publicKey,
+            vaultState: vaultPda,
+            tokenMint: mint,
+            shareMint: shareMintPda,
+            userTokenAccount: user1TokenAccount,
+            reserveAta: reserveAta,
+            userShareToken: user1ShareToken,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user1])
+          .rpc();
+        assert.fail("Should have thrown ZeroAmount error");
+      } catch (err) {
+        assert.ok(
+          err.toString().includes("Amount must be greater than zero"),
+          "should be ZeroAmount error"
+        );
+        console.log("Zero withdraw correctly rejected");
+      }
+    });
+
+    it("withdraw — full withdrawal empties the vault", async () => {
+      const user1ShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: user1.publicKey,
+      });
+
+      // Burn all remaining 4M shares
+      await program.methods
+        .withdraw(new BN(4_000_000))
+        .accountsStrict({
+          user: user1.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          userTokenAccount: user1TokenAccount,
+          reserveAta: reserveAta,
+          userShareToken: user1ShareToken,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user1])
+        .rpc();
+
+      // Vault should be empty
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(
+        vault.totalDeposited.eq(new BN(0)),
+        "total_deposited should be 0"
+      );
+
+      const reserveBalance = await connection.getTokenAccountBalance(
+        reserveAta
+      );
+      assert.ok(+reserveBalance.value.amount === 0, "reserve should be empty");
+
+      const shareBalance = await connection.getTokenAccountBalance(
+        user1ShareToken
+      );
+      assert.ok(+shareBalance.value.amount === 0, "user should have 0 shares");
+
+      // User should have all 10M tokens back
+      const userBalance = await connection.getTokenAccountBalance(
+        user1TokenAccount
+      );
+      assert.ok(
+        +userBalance.value.amount === 10_000_000,
+        "user should have all 10M tokens back"
+      );
+
+      console.log("Full withdrawal: vault empty, user has all tokens back");
+    });
+  });
 });

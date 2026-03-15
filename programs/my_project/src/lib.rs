@@ -11,7 +11,7 @@ use anchor_lang::prelude::*;
 // - Approve: set a delegate (allowance) on a strategy token account
 // - Revoke: remove a delegate from a strategy token account
 use anchor_spl::token_interface::{
-    self, Approve, Burn, Mint, MintTo, Revoke, TokenAccount, TokenInterface, TransferChecked,
+    self, Approve, Burn, Mint, MintTo, Revoke, TokenAccount, TokenInterface,
 };
 
 // Associated Token Account program — creates deterministic token accounts
@@ -131,6 +131,173 @@ pub mod my_project {
 
         Ok(())
     }
+
+    // ============================================================
+    // VAULT INSTRUCTIONS (Phase 2)
+    // ============================================================
+
+    // VAULT INSTRUCTION 1: Create the vault infrastructure.
+    // Creates 3 accounts in one transaction:
+    //   1. VaultState PDA — the vault's config (like deploying a contract)
+    //   2. Share Mint PDA — a new token that represents ownership of the vault
+    //   3. Reserve ATA — the main token account where deposits land
+    // Whoever calls this becomes the admin AND authority.
+    // Similar to initialize() above but creates more accounts.
+    pub fn initialize_vault(ctx: Context<InitializeVault>) -> Result<()> {
+        msg!("Initializing vault for mint: {:?}", ctx.accounts.token_mint.key());
+
+        // Populate the vault state — same pattern as setting counter.value and counter.bump
+        let vault = &mut ctx.accounts.vault_state;
+        vault.admin = ctx.accounts.admin.key();
+        vault.authority = ctx.accounts.admin.key(); // defaults to admin, can be changed later
+        vault.token_mint = ctx.accounts.token_mint.key();
+        vault.share_mint = ctx.accounts.share_mint.key();
+        vault.total_deposited = 0;
+        vault.strategy_count = 0;
+        vault.bump = ctx.bumps.vault_state;
+        vault.share_mint_bump = ctx.bumps.share_mint;
+
+        msg!("Vault initialized. Admin: {:?}", vault.admin);
+
+        Ok(())
+    }
+
+    // VAULT INSTRUCTION 2: Deposit tokens and receive shares.
+    // Similar to increment() — user sends tokens to the vault (like increment sends to counter PDA).
+    // NEW: also mints share tokens to the user (proportional to their deposit).
+    //
+    // Share math:
+    //   First deposit: shares = amount (1:1)
+    //   After that:    shares = amount * total_shares / total_deposited
+    //
+    // Two CPIs:
+    //   1. transfer_checked: user tokens → reserve (user signs, like increment)
+    //   2. mint_to: share tokens → user (vault PDA signs, like decrement's with_signer pattern)
+    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+        require!(amount > 0, VaultError::ZeroAmount);
+
+        let share_supply = ctx.accounts.share_mint.supply;
+        let total_deposited = ctx.accounts.vault_state.total_deposited;
+
+        // Calculate how many shares to mint.
+        // First deposit = 1:1 (no existing shares to calculate ratio against).
+        // After that = proportional: you get shares based on current "exchange rate".
+        // Example: vault has 1000 USDC and 1000 shares. You deposit 500 USDC.
+        //          shares = 500 * 1000 / 1000 = 500 shares (each share = 1 USDC).
+        // Example with yield: vault has 1200 USDC and 1000 shares (earned 200 profit).
+        //          shares = 500 * 1000 / 1200 = 416 shares (each share = 1.2 USDC).
+        let shares_to_mint = if share_supply == 0 {
+            amount
+        } else {
+            amount * share_supply / total_deposited
+        };
+
+        // CPI 1: Transfer tokens from user → reserve ATA.
+        // Same pattern as increment's transfer.
+        let cpi_accounts = anchor_spl::token::Transfer {
+            from: ctx.accounts.user_token_account.to_account_info(),
+            to: ctx.accounts.reserve_ata.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(), // user signs (like increment)
+        };
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+        );
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
+
+        // CPI 2: Mint share tokens to user.
+        // The vault PDA is the mint authority — it signs using with_signer (like decrement).
+        // This is the NEW part compared to increment — increment doesn't mint anything.
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        let mint_accounts = MintTo {
+            mint: ctx.accounts.share_mint.to_account_info(),
+            to: ctx.accounts.user_share_token.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(), // vault PDA signs
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            mint_accounts,
+            signer_seeds,
+        );
+        token_interface::mint_to(cpi_ctx, shares_to_mint)?;
+
+        // Update accounting — same pattern as counter.value += increment_by
+        ctx.accounts.vault_state.total_deposited += amount;
+
+        msg!("Deposited {} tokens, minted {} shares", amount, shares_to_mint);
+
+        Ok(())
+    }
+
+    // VAULT INSTRUCTION 3: Burn shares and withdraw tokens.
+    // Similar to decrement() — vault PDA sends tokens back to user (PDA signs via with_signer).
+    // NEW: also burns the user's share tokens first.
+    //
+    // Withdrawal math:
+    //   underlying = shares_to_burn * total_deposited / share_supply
+    //
+    // Two CPIs:
+    //   1. burn: destroy user's shares (user signs — they're burning their own tokens)
+    //   2. transfer: reserve → user (vault PDA signs, exactly like decrement)
+    pub fn withdraw(ctx: Context<Withdraw>, shares_to_burn: u64) -> Result<()> {
+        require!(shares_to_burn > 0, VaultError::ZeroAmount);
+
+        let share_supply = ctx.accounts.share_mint.supply;
+        let total_deposited = ctx.accounts.vault_state.total_deposited;
+
+        // Calculate how many underlying tokens the shares are worth.
+        // Example: you have 500 shares, vault has 1200 USDC and 1000 total shares.
+        //          underlying = 500 * 1200 / 1000 = 600 USDC (you earned 100 profit!)
+        let underlying_amount = shares_to_burn * total_deposited / share_supply;
+
+        // Check that the reserve has enough tokens.
+        // If too many funds are in strategies, this fails — authority must deallocate first.
+        require!(
+            ctx.accounts.reserve_ata.amount >= underlying_amount,
+            VaultError::InsufficientReserve
+        );
+
+        // CPI 1: Burn the user's share tokens.
+        // User signs because they own the shares (like how user signs in increment).
+        let burn_accounts = Burn {
+            mint: ctx.accounts.share_mint.to_account_info(),
+            from: ctx.accounts.user_share_token.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(), // user signs
+        };
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            burn_accounts,
+        );
+        token_interface::burn(cpi_ctx, shares_to_burn)?;
+
+        // CPI 2: Transfer underlying tokens from reserve → user.
+        // Vault PDA signs — exactly the same pattern as decrement's with_signer.
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        let cpi_accounts = anchor_spl::token::Transfer {
+            from: ctx.accounts.reserve_ata.to_account_info(),
+            to: ctx.accounts.user_token_account.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(), // vault PDA signs
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+        anchor_spl::token::transfer(cpi_ctx, underlying_amount)?;
+
+        // Update accounting — same pattern as counter.value -= decrement_by
+        ctx.accounts.vault_state.total_deposited -= underlying_amount;
+
+        msg!("Burned {} shares, withdrew {} tokens", shares_to_burn, underlying_amount);
+
+        Ok(())
+    }
 }
 
 // Custom error codes for the counter (legacy).
@@ -157,11 +324,6 @@ pub enum VaultError {
     // Happens when too many funds are in strategies — authority must deallocate first.
     #[msg("Insufficient reserve for withdrawal")]
     InsufficientReserve,
-
-    // Checked arithmetic (checked_mul, checked_div) returned None.
-    // Prevents silent overflow — like Solidity 0.8+ overflow protection.
-    #[msg("Arithmetic overflow")]
-    MathOverflow,
 
     // Trying to use a deactivated strategy. Once deactivated, it's permanent.
     #[msg("Strategy is not active")]
@@ -300,6 +462,200 @@ pub struct Decrement<'info> {
 
     pub token_program: Interface<'info, TokenInterface>,
 }
+
+// ============================================================
+// VAULT ACCOUNT VALIDATION STRUCTS (Phase 2)
+// ============================================================
+// Same pattern as Initialize/Increment/Decrement above —
+// each struct defines which accounts the instruction needs and what checks to run.
+
+// Accounts for `initialize_vault` — creates the vault infrastructure.
+// Compare to Initialize: same pattern (init + seeds + payer) but creates 3 accounts instead of 1.
+#[derive(Accounts)]
+pub struct InitializeVault<'info> {
+    // The admin who pays for account creation. Becomes vault admin + authority.
+    // Same as `signer` in Initialize — must sign and is mut because they pay.
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    // The vault's main config PDA.
+    // Same pattern as counter PDA: init + seeds + payer + space.
+    // Seeds use token_mint so there's one vault per token type.
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + VaultState::INIT_SPACE,
+        seeds = [b"vault", token_mint.key().as_ref()],
+        bump,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    // The underlying token (e.g. USDC). Already exists — we just reference it.
+    // Not mut because we don't modify the mint itself.
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    // The share token mint — created as a PDA owned by the vault.
+    // mint::authority = vault_state means only the vault program can mint/burn shares.
+    // mint::decimals matches the underlying token for consistent math.
+    // This is NEW — the counter didn't have its own token.
+    #[account(
+        init,
+        payer = admin,
+        seeds = [b"shares", vault_state.key().as_ref()],
+        bump,
+        mint::decimals = token_mint.decimals,
+        mint::authority = vault_state,
+        mint::token_program = token_program,
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+
+    // The main reserve token account — where all deposits land.
+    // Owned by the vault PDA (associated_token::authority = vault_state).
+    // Same concept as the counter PDA's ATA in Increment/Decrement,
+    // but this one belongs to the vault instead of a counter.
+    #[account(
+        init,
+        payer = admin,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_state,
+        associated_token::token_program = token_program,
+    )]
+    pub reserve_ata: InterfaceAccount<'info, TokenAccount>,
+
+    // Required programs — same as Initialize but with token + associated_token added.
+    pub system_program: Program<'info, System>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+// Accounts for `deposit` — user sends tokens, receives shares.
+// Combines patterns from Increment (user→PDA transfer) with NEW share minting.
+#[derive(Accounts)]
+pub struct Deposit<'info> {
+    // The depositor — signs the token transfer (like signer in Increment).
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    // The vault config — mut because we update total_deposited.
+    // Seeds validated to ensure we're using the correct vault.
+    #[account(
+        mut,
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    // The underlying token mint — constraint ensures it matches the vault's token.
+    #[account(
+        constraint = token_mint.key() == vault_state.token_mint @ VaultError::InvalidMint,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    // The share token mint — mut because supply changes when we mint shares.
+    #[account(
+        mut,
+        constraint = share_mint.key() == vault_state.share_mint @ VaultError::InvalidMint,
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+
+    // User's token account (source) — same pattern as source_token_account in Increment.
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = user,
+        associated_token::token_program = token_program,
+    )]
+    pub user_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    // The vault's reserve — same pattern as destination_token_account in Increment.
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_state,
+        associated_token::token_program = token_program,
+    )]
+    pub reserve_ata: InterfaceAccount<'info, TokenAccount>,
+
+    // User's share token account — init_if_needed creates it if the user hasn't deposited before.
+    // This is NEW — the counter didn't issue any tokens to the user.
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = share_mint,
+        associated_token::authority = user,
+        associated_token::token_program = token_program,
+    )]
+    pub user_share_token: InterfaceAccount<'info, TokenAccount>,
+
+    pub system_program: Program<'info, System>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+// Accounts for `withdraw` — user burns shares, receives tokens.
+// Combines patterns from Decrement (PDA→user transfer with PDA signing) with NEW share burning.
+#[derive(Accounts)]
+pub struct Withdraw<'info> {
+    // The withdrawer — signs the share burn.
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    // The vault config — mut because we update total_deposited.
+    #[account(
+        mut,
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    // The underlying token mint.
+    #[account(
+        constraint = token_mint.key() == vault_state.token_mint @ VaultError::InvalidMint,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    // The share mint — mut because supply changes when we burn shares.
+    #[account(
+        mut,
+        constraint = share_mint.key() == vault_state.share_mint @ VaultError::InvalidMint,
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+
+    // User's underlying token account — receives withdrawn tokens.
+    // Same pattern as destination_token_account in Decrement.
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = user,
+        associated_token::token_program = token_program,
+    )]
+    pub user_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    // The vault's reserve — source of withdrawn tokens.
+    // Same pattern as source_token_account in Decrement (PDA signs the transfer).
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_state,
+        associated_token::token_program = token_program,
+    )]
+    pub reserve_ata: InterfaceAccount<'info, TokenAccount>,
+
+    // User's share token account — shares are burned from here.
+    #[account(
+        mut,
+        associated_token::mint = share_mint,
+        associated_token::authority = user,
+        associated_token::token_program = token_program,
+    )]
+    pub user_share_token: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// ============================================================
+// LEGACY DATA ACCOUNTS
+// ============================================================
 
 // On-chain data stored in the counter PDA (legacy — kept for reference).
 // #[account] adds an 8-byte discriminator (hash of "account:Counter") to prevent type confusion.
