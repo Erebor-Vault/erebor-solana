@@ -1,8 +1,22 @@
 // Import all common Anchor types: Context, Result, Account, Signer, msg!, etc.
 use anchor_lang::prelude::*;
+
 // Import SPL Token interface types — using token_interface (not token) to support
 // both the classic Token program AND Token-2022 (token extensions).
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+//
+// CPI struct types for vault operations (will be used in Phase 2 & 3):
+// - MintTo: mint share tokens on deposit
+// - Burn: burn share tokens on withdraw
+// - TransferChecked: move tokens between accounts (with decimal verification)
+// - Approve: set a delegate (allowance) on a strategy token account
+// - Revoke: remove a delegate from a strategy token account
+use anchor_spl::token_interface::{
+    self, Approve, Burn, Mint, MintTo, Revoke, TokenAccount, TokenInterface, TransferChecked,
+};
+
+// Associated Token Account program — creates deterministic token accounts
+// derived from (wallet, mint). Needed for init of reserve ATA in initialize_vault.
+use anchor_spl::associated_token::AssociatedToken;
 
 // Unique on-chain address of this program (like a contract address in Solidity).
 // Anchor verifies at runtime that the executing program matches this ID.
@@ -119,11 +133,57 @@ pub mod my_project {
     }
 }
 
-// Custom error codes — show up in transaction logs and can be matched client-side.
-// Like Solidity's custom errors: error InsufficientBalance();
+// Custom error codes for the counter (legacy).
 #[error_code]
 enum MyErrors {
     AmountTooSmall,
+}
+
+// ============================================================
+// VAULT ERROR CODES (Phase 1)
+// ============================================================
+// Custom error codes for the vault program.
+// Each variant gets a unique error code (starting after MyErrors).
+// These show up in transaction logs and can be matched client-side.
+// Usage: require!(condition, VaultError::SomeError)
+// Usage in constraints: constraint = ... @ VaultError::SomeError
+#[error_code]
+pub enum VaultError {
+    // Source token account doesn't have enough tokens.
+    #[msg("Insufficient balance in source account")]
+    InsufficientBalance,
+
+    // Reserve ATA doesn't have enough for withdrawal.
+    // Happens when too many funds are in strategies — authority must deallocate first.
+    #[msg("Insufficient reserve for withdrawal")]
+    InsufficientReserve,
+
+    // Checked arithmetic (checked_mul, checked_div) returned None.
+    // Prevents silent overflow — like Solidity 0.8+ overflow protection.
+    #[msg("Arithmetic overflow")]
+    MathOverflow,
+
+    // Trying to use a deactivated strategy. Once deactivated, it's permanent.
+    #[msg("Strategy is not active")]
+    StrategyInactive,
+
+    // Signer is not the vault admin.
+    // Admin-only: create_strategy, update_strategy_delegate, deactivate_strategy.
+    #[msg("Unauthorized: not admin")]
+    UnauthorizedAdmin,
+
+    // Signer is not the vault authority.
+    // Authority-only: allocate_to_strategy, deallocate_from_strategy.
+    #[msg("Unauthorized: not authority")]
+    UnauthorizedAuthority,
+
+    // Token mint doesn't match what's stored in vault state.
+    #[msg("Invalid token mint")]
+    InvalidMint,
+
+    // Deposit/withdraw amount must be > 0.
+    #[msg("Amount must be greater than zero")]
+    ZeroAmount,
 }
 
 // ============================================================
@@ -241,7 +301,7 @@ pub struct Decrement<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
-// On-chain data stored in the counter PDA.
+// On-chain data stored in the counter PDA (legacy — kept for reference).
 // #[account] adds an 8-byte discriminator (hash of "account:Counter") to prevent type confusion.
 // #[derive(InitSpace)] auto-calculates size: u64 (8 bytes) + u8 (1 byte) = 9 bytes.
 #[account]
@@ -250,3 +310,99 @@ pub struct Counter {
     pub value: u64, // the counter value
     pub bump: u8,   // stored PDA bump for efficient re-derivation
 }
+
+// ============================================================
+// VAULT DATA ACCOUNTS (Phase 1)
+// ============================================================
+// These define the on-chain data layout for vault PDA accounts.
+// Same pattern as Counter above — #[account] adds an 8-byte discriminator,
+// #[derive(InitSpace)] auto-calculates byte size for space = 8 + Struct::INIT_SPACE.
+
+/// VaultState — the main configuration account for a vault.
+///
+/// Seeds: ["vault", token_mint.key()]
+/// One vault per token mint — a USDC vault and a USDT vault get separate PDAs.
+///
+/// This is like the counter's PDA but stores vault config instead of a simple value.
+/// Same pattern: seeds derive a unique address, bump is stored for efficient re-derivation.
+#[account]
+#[derive(InitSpace)]
+pub struct VaultState {
+    /// The admin — can create/deactivate strategies and change delegates.
+    /// Set to whoever calls initialize_vault. Like Ownable's owner in Solidity.
+    pub admin: Pubkey, // 32 bytes
+
+    /// The operational authority — can allocate/deallocate funds between reserve and strategies.
+    /// Separated from admin so a bot can rebalance without admin privileges.
+    pub authority: Pubkey, // 32 bytes
+
+    /// The accepted deposit token mint (e.g. USDC).
+    /// The vault only accepts this token — like a single-asset ERC-4626 vault.
+    pub token_mint: Pubkey, // 32 bytes
+
+    /// The vault's share token mint (created as a PDA during initialize_vault).
+    /// Only this program can mint/burn shares (vault PDA = mint authority).
+    pub share_mint: Pubkey, // 32 bytes
+
+    /// Total underlying tokens in the vault (reserve + all strategies).
+    /// This is the ACCOUNTING total — doesn't change when funds move to strategies.
+    /// Only changes on deposit (+) and withdraw (-).
+    /// Same concept as counter.value but tracks total vault assets.
+    pub total_deposited: u64, // 8 bytes
+
+    /// Auto-incrementing strategy ID counter (0, 1, 2, ...).
+    /// Only goes up — deactivated strategies keep their IDs to prevent seed collisions.
+    pub strategy_count: u64, // 8 bytes
+
+    /// PDA bump — same pattern as counter.bump.
+    /// Stored so we don't recalculate it every time we need PDA signing (~1000 CU saved).
+    pub bump: u8, // 1 byte
+
+    /// PDA bump for the share_mint account.
+    pub share_mint_bump: u8, // 1 byte
+}
+// Total: 32*4 + 8*2 + 1*2 = 146 bytes
+// On-chain space: 8 (discriminator) + 146 = 154 bytes
+
+/// StrategyAllocation — metadata for a single strategy.
+///
+/// Seeds: ["strategy", vault_state.key(), &strategy_id.to_le_bytes()]
+/// Each strategy = one "pocket" where the vault can delegate tokens to an external protocol.
+///
+/// This is the workaround for Solana's 1-delegate-per-account limitation:
+/// instead of one account with multiple delegates (impossible),
+/// we create multiple accounts each with one delegate.
+///
+/// Think of it like: you can't give 3 people a key to the same safe,
+/// but you CAN create 3 safes and give one key each.
+#[account]
+#[derive(InitSpace)]
+pub struct StrategyAllocation {
+    /// Back-reference to the VaultState this strategy belongs to.
+    pub vault: Pubkey, // 32 bytes
+
+    /// Unique sequential ID (0, 1, 2, ...). Part of the PDA seeds.
+    pub strategy_id: u64, // 8 bytes
+
+    /// The external protocol address approved as delegate on this strategy's token account.
+    /// This protocol can spend tokens up to the account balance.
+    /// Like calling IERC20.approve(protocol, amount) in Solidity.
+    pub delegate: Pubkey, // 32 bytes
+
+    /// How many tokens are currently allocated to this strategy.
+    /// Tracked separately because the delegate might have spent some.
+    pub allocated_amount: u64, // 8 bytes
+
+    /// The PDA token account holding this strategy's tokens.
+    /// Seeds: ["strategy_token", vault_state, strategy_id].
+    /// Owned by vault PDA, with delegate set to the external protocol.
+    pub token_account: Pubkey, // 32 bytes
+
+    /// Whether this strategy is active. Once deactivated, it's permanent.
+    pub is_active: bool, // 1 byte
+
+    /// PDA bump — same pattern as counter.bump and vault_state.bump.
+    pub bump: u8, // 1 byte
+}
+// Total: 32*3 + 8*2 + 1*2 = 114 bytes
+// On-chain space: 8 (discriminator) + 114 = 122 bytes
