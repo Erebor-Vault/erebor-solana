@@ -679,5 +679,272 @@ describe("my_project", () => {
 
       console.log("Full withdrawal: vault empty, user has all tokens back");
     });
+
+    // ============================================================
+    // STRATEGY TESTS (Phase 3)
+    // ============================================================
+    // These tests run AFTER the vault tests above.
+    // The vault is empty after full withdrawal, so we re-deposit first.
+
+    // Shared strategy state
+    let protocolA: Keypair;
+    let protocolB: Keypair;
+    let strategyPda: anchor.web3.PublicKey;
+    let strategyTokenAccount: anchor.web3.PublicKey;
+
+    it("strategy setup — re-deposit funds for strategy tests", async () => {
+      protocolA = Keypair.generate();
+      protocolB = Keypair.generate();
+
+      // Re-deposit 8M tokens so the vault has funds to allocate
+      const user1ShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: user1.publicKey,
+      });
+
+      await program.methods
+        .deposit(new BN(8_000_000))
+        .accountsStrict({
+          user: user1.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          userTokenAccount: user1TokenAccount,
+          reserveAta: reserveAta,
+          userShareToken: user1ShareToken,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([user1])
+        .rpc();
+
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(vault.totalDeposited.eq(new BN(8_000_000)));
+      console.log("Re-deposited 8M for strategy tests");
+    });
+
+    it("create_strategy — admin creates strategy with delegate", async () => {
+      // Derive strategy PDA — seeds: ["strategy", vault, strategy_count(=0)]
+      [strategyPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      // Derive strategy token account PDA — seeds: ["strategy_token", vault, strategy_count(=0)]
+      [strategyTokenAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy_token"), vaultPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      await program.methods
+        .createStrategy()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          strategyTokenAccount: strategyTokenAccount,
+          delegate: protocolA.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Verify strategy state
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.vault.equals(vaultPda), "vault should match");
+      assert.ok(strategy.strategyId.eq(new BN(0)), "strategy_id should be 0");
+      assert.ok(strategy.delegate.equals(protocolA.publicKey), "delegate should be protocolA");
+      assert.ok(strategy.allocatedAmount.eq(new BN(0)), "allocated_amount should be 0");
+      assert.ok(strategy.isActive === true, "should be active");
+
+      // Verify vault strategy_count incremented
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(vault.strategyCount.eq(new BN(1)), "strategy_count should be 1");
+
+      console.log("Strategy 0 created with delegate protocolA");
+    });
+
+    it("create_strategy — non-admin rejected", async () => {
+      // Derive strategy PDA for strategy_id=1
+      const [strategyPda1] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(1).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+      const [strategyToken1] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy_token"), vaultPda.toBuffer(), new BN(1).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      try {
+        await program.methods
+          .createStrategy()
+          .accountsStrict({
+            admin: user1.publicKey, // user1 is NOT admin
+            vaultState: vaultPda,
+            strategy: strategyPda1,
+            tokenMint: mint,
+            strategyTokenAccount: strategyToken1,
+            delegate: protocolA.publicKey,
+            systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([user1])
+          .rpc();
+        assert.fail("Should have thrown UnauthorizedAdmin");
+      } catch (err: any) {
+        assert.ok(err.toString().includes("Unauthorized"), "should be UnauthorizedAdmin error");
+        console.log("Non-admin correctly rejected");
+      }
+    });
+
+    it("allocate_to_strategy — moves funds from reserve to strategy", async () => {
+      const allocateAmount = new BN(3_000_000);
+
+      await program.methods
+        .allocateToStrategy(allocateAmount)
+        .accountsStrict({
+          authority: admin.publicKey, // admin is also authority (set in initialize_vault)
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          reserveAta: reserveAta,
+          strategyTokenAccount: strategyTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Verify strategy allocated_amount
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.allocatedAmount.eq(allocateAmount), "allocated_amount should be 3M");
+
+      // Verify reserve decreased
+      const reserveBalance = await connection.getTokenAccountBalance(reserveAta);
+      assert.ok(+reserveBalance.value.amount === 5_000_000, "reserve should have 5M (8M - 3M)");
+
+      // Verify strategy token account received tokens
+      const strategyBalance = await connection.getTokenAccountBalance(strategyTokenAccount);
+      assert.ok(+strategyBalance.value.amount === 3_000_000, "strategy should have 3M");
+
+      // Verify total_deposited did NOT change
+      const vault = await program.account.vaultState.fetch(vaultPda);
+      assert.ok(vault.totalDeposited.eq(new BN(8_000_000)), "total_deposited should still be 8M");
+
+      console.log("Allocated 3M to strategy — reserve: 5M, strategy: 3M");
+    });
+
+    it("deallocate_from_strategy — moves funds back to reserve", async () => {
+      const deallocateAmount = new BN(1_000_000);
+
+      await program.methods
+        .deallocateFromStrategy(deallocateAmount)
+        .accountsStrict({
+          authority: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          reserveAta: reserveAta,
+          strategyTokenAccount: strategyTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Verify strategy allocated_amount decreased
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.allocatedAmount.eq(new BN(2_000_000)), "allocated_amount should be 2M");
+
+      // Verify balances
+      const reserveBalance = await connection.getTokenAccountBalance(reserveAta);
+      assert.ok(+reserveBalance.value.amount === 6_000_000, "reserve should have 6M");
+
+      const strategyBalance = await connection.getTokenAccountBalance(strategyTokenAccount);
+      assert.ok(+strategyBalance.value.amount === 2_000_000, "strategy should have 2M");
+
+      console.log("Deallocated 1M — reserve: 6M, strategy: 2M");
+    });
+
+    it("update_strategy_delegate — changes delegate from protocolA to protocolB", async () => {
+      await program.methods
+        .updateStrategyDelegate()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          strategyTokenAccount: strategyTokenAccount,
+          newDelegate: protocolB.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Verify delegate updated
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.delegate.equals(protocolB.publicKey), "delegate should be protocolB");
+
+      console.log("Delegate updated from protocolA to protocolB");
+    });
+
+    it("deactivate_strategy — pulls funds back and marks inactive", async () => {
+      // Strategy still has 2M tokens
+      const reserveBefore = await connection.getTokenAccountBalance(reserveAta);
+
+      await program.methods
+        .deactivateStrategy()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          strategyTokenAccount: strategyTokenAccount,
+          reserveAta: reserveAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Verify strategy is inactive
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.isActive === false, "should be inactive");
+      assert.ok(strategy.allocatedAmount.eq(new BN(0)), "allocated_amount should be 0");
+
+      // Verify funds returned to reserve (2M came back)
+      const reserveAfter = await connection.getTokenAccountBalance(reserveAta);
+      assert.ok(
+        Number(reserveAfter.value.amount) - Number(reserveBefore.value.amount) === 2_000_000,
+        "reserve should have received 2M back"
+      );
+
+      // Verify strategy token account is empty
+      const strategyBalance = await connection.getTokenAccountBalance(strategyTokenAccount);
+      assert.ok(+strategyBalance.value.amount === 0, "strategy should be empty");
+
+      console.log("Strategy deactivated — 2M returned to reserve");
+    });
+
+    it("allocate_to_strategy — inactive strategy rejected", async () => {
+      try {
+        await program.methods
+          .allocateToStrategy(new BN(1_000_000))
+          .accountsStrict({
+            authority: admin.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            tokenMint: mint,
+            reserveAta: reserveAta,
+            strategyTokenAccount: strategyTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([admin])
+          .rpc();
+        assert.fail("Should have thrown StrategyInactive");
+      } catch (err: any) {
+        assert.ok(err.toString().includes("Strategy is not active"), "should be StrategyInactive error");
+        console.log("Allocating to inactive strategy correctly rejected");
+      }
+    });
   });
 });

@@ -298,6 +298,211 @@ pub mod my_project {
 
         Ok(())
     }
+
+    // ============================================================
+    // STRATEGY INSTRUCTIONS (Phase 3)
+    // ============================================================
+
+    // STRATEGY INSTRUCTION 1: Create a new strategy with a delegate.
+    // Admin creates a "pocket" (strategy token account) and approves an external protocol
+    // (delegate) to spend from it. No funds are moved yet — that's allocate_to_strategy.
+    //
+    // Creates 2 accounts:
+    //   1. StrategyAllocation PDA — metadata (who's the delegate, how much allocated, etc.)
+    //   2. Strategy Token Account PDA — holds tokens for this strategy, vault PDA is authority
+    //
+    // Then does 1 CPI:
+    //   approve: sets the delegate on the strategy token account (vault PDA signs)
+    pub fn create_strategy(ctx: Context<CreateStrategy>) -> Result<()> {
+        // Populate strategy metadata
+        let strategy = &mut ctx.accounts.strategy;
+        strategy.vault = ctx.accounts.vault_state.key();
+        strategy.strategy_id = ctx.accounts.vault_state.strategy_count;
+        strategy.delegate = ctx.accounts.delegate.key();
+        strategy.allocated_amount = 0;
+        strategy.token_account = ctx.accounts.strategy_token_account.key();
+        strategy.is_active = true;
+        strategy.bump = ctx.bumps.strategy;
+
+        // CPI: Approve the delegate on the strategy token account.
+        // Same PDA signing pattern as decrement/withdraw — vault PDA signs.
+        // u64::MAX = unlimited allowance. Risk is controlled by how much we allocate, not the approval.
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        let approve_accounts = Approve {
+            to: ctx.accounts.strategy_token_account.to_account_info(),
+            delegate: ctx.accounts.delegate.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            approve_accounts,
+            signer_seeds,
+        );
+        token_interface::approve(cpi_ctx, u64::MAX)?;
+
+        // Increment strategy counter so next strategy gets a unique ID
+        ctx.accounts.vault_state.strategy_count += 1;
+
+        msg!(
+            "Strategy {} created with delegate {:?}",
+            strategy.strategy_id,
+            strategy.delegate
+        );
+
+        Ok(())
+    }
+
+    // STRATEGY INSTRUCTION 2: Move funds from reserve to a strategy's token account.
+    // Same pattern as deposit's transfer (vault PDA signs to move tokens from reserve),
+    // but destination is a strategy account instead of staying in reserve.
+    // total_deposited does NOT change — funds are still in the vault system.
+    pub fn allocate_to_strategy(ctx: Context<AllocateToStrategy>, amount: u64) -> Result<()> {
+        require!(amount > 0, VaultError::ZeroAmount);
+
+        // Vault PDA signs the transfer — same pattern as withdraw
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        let cpi_accounts = anchor_spl::token::Transfer {
+            from: ctx.accounts.reserve_ata.to_account_info(),
+            to: ctx.accounts.strategy_token_account.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
+
+        // Track how much is in this strategy
+        ctx.accounts.strategy.allocated_amount += amount;
+
+        msg!("Allocated {} to strategy {}", amount, ctx.accounts.strategy.strategy_id);
+
+        Ok(())
+    }
+
+    // STRATEGY INSTRUCTION 3: Pull funds back from a strategy to the reserve.
+    // Reverse of allocate — same transfer pattern but strategy → reserve.
+    pub fn deallocate_from_strategy(ctx: Context<DeallocateFromStrategy>, amount: u64) -> Result<()> {
+        require!(amount > 0, VaultError::ZeroAmount);
+
+        // Vault PDA signs — it's the authority on both accounts
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        let cpi_accounts = anchor_spl::token::Transfer {
+            from: ctx.accounts.strategy_token_account.to_account_info(),
+            to: ctx.accounts.reserve_ata.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+        anchor_spl::token::transfer(cpi_ctx, amount)?;
+
+        ctx.accounts.strategy.allocated_amount -= amount;
+
+        msg!("Deallocated {} from strategy {}", amount, ctx.accounts.strategy.strategy_id);
+
+        Ok(())
+    }
+
+    // STRATEGY INSTRUCTION 4: Change which protocol can spend from a strategy.
+    // Two CPIs: revoke old delegate, approve new one. Same PDA signing pattern.
+    pub fn update_strategy_delegate(ctx: Context<UpdateStrategyDelegate>) -> Result<()> {
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        // Revoke old delegate
+        let revoke_accounts = Revoke {
+            source: ctx.accounts.strategy_token_account.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            revoke_accounts,
+            signer_seeds,
+        );
+        token_interface::revoke(cpi_ctx)?;
+
+        // Approve new delegate
+        let approve_accounts = Approve {
+            to: ctx.accounts.strategy_token_account.to_account_info(),
+            delegate: ctx.accounts.new_delegate.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            approve_accounts,
+            signer_seeds,
+        );
+        token_interface::approve(cpi_ctx, u64::MAX)?;
+
+        // Update the stored delegate
+        ctx.accounts.strategy.delegate = ctx.accounts.new_delegate.key();
+
+        msg!(
+            "Strategy {} delegate updated to {:?}",
+            ctx.accounts.strategy.strategy_id,
+            ctx.accounts.strategy.delegate
+        );
+
+        Ok(())
+    }
+
+    // STRATEGY INSTRUCTION 5: Shut down a strategy permanently.
+    // Revokes delegate, pulls all remaining funds back to reserve, marks inactive.
+    pub fn deactivate_strategy(ctx: Context<DeactivateStrategy>) -> Result<()> {
+        let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let bump = ctx.accounts.vault_state.bump;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+
+        // Revoke delegate access
+        let revoke_accounts = Revoke {
+            source: ctx.accounts.strategy_token_account.to_account_info(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            revoke_accounts,
+            signer_seeds,
+        );
+        token_interface::revoke(cpi_ctx)?;
+
+        // If there are remaining tokens, transfer them back to reserve
+        let remaining = ctx.accounts.strategy_token_account.amount;
+        if remaining > 0 {
+            let cpi_accounts = anchor_spl::token::Transfer {
+                from: ctx.accounts.strategy_token_account.to_account_info(),
+                to: ctx.accounts.reserve_ata.to_account_info(),
+                authority: ctx.accounts.vault_state.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_accounts,
+                signer_seeds,
+            );
+            anchor_spl::token::transfer(cpi_ctx, remaining)?;
+        }
+
+        // Mark as permanently inactive
+        ctx.accounts.strategy.is_active = false;
+        ctx.accounts.strategy.allocated_amount = 0;
+
+        msg!("Strategy {} deactivated", ctx.accounts.strategy.strategy_id);
+
+        Ok(())
+    }
 }
 
 // Custom error codes for the counter (legacy).
@@ -649,6 +854,220 @@ pub struct Withdraw<'info> {
         associated_token::token_program = token_program,
     )]
     pub user_share_token: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// ============================================================
+// STRATEGY ACCOUNT VALIDATION STRUCTS (Phase 3)
+// ============================================================
+
+// Accounts for `create_strategy` — admin creates a new strategy + token account + sets delegate.
+// Creates 2 new accounts (strategy PDA + strategy token account PDA).
+#[derive(Accounts)]
+pub struct CreateStrategy<'info> {
+    // Admin must sign — constraint checks they match vault_state.admin
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+        constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    // New strategy metadata PDA — seeds include strategy_count for unique ID
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + StrategyAllocation::INIT_SPACE,
+        seeds = [b"strategy", vault_state.key().as_ref(), &vault_state.strategy_count.to_le_bytes()],
+        bump,
+    )]
+    pub strategy: Account<'info, StrategyAllocation>,
+
+    // The underlying token mint — must match the vault's token
+    #[account(
+        constraint = token_mint.key() == vault_state.token_mint @ VaultError::InvalidMint,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    // New token account for this strategy — owned by vault PDA.
+    // This is the "pocket" that the delegate can spend from.
+    #[account(
+        init,
+        payer = admin,
+        seeds = [b"strategy_token", vault_state.key().as_ref(), &vault_state.strategy_count.to_le_bytes()],
+        bump,
+        token::mint = token_mint,
+        token::authority = vault_state,
+        token::token_program = token_program,
+    )]
+    pub strategy_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: The external protocol address to approve as delegate. Just a pubkey, no validation needed.
+    pub delegate: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// Accounts for `allocate_to_strategy` — authority moves funds from reserve → strategy.
+#[derive(Accounts)]
+pub struct AllocateToStrategy<'info> {
+    // Authority must sign — the operational role that moves funds
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+        constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    #[account(
+        mut,
+        constraint = strategy.vault == vault_state.key() @ VaultError::InvalidMint,
+        constraint = strategy.is_active @ VaultError::StrategyInactive,
+    )]
+    pub strategy: Account<'info, StrategyAllocation>,
+
+    #[account(
+        constraint = token_mint.key() == vault_state.token_mint @ VaultError::InvalidMint,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    // Reserve — source of funds
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_state,
+        associated_token::token_program = token_program,
+    )]
+    pub reserve_ata: InterfaceAccount<'info, TokenAccount>,
+
+    // Strategy token account — destination
+    #[account(
+        mut,
+        constraint = strategy_token_account.key() == strategy.token_account @ VaultError::InvalidMint,
+    )]
+    pub strategy_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// Accounts for `deallocate_from_strategy` — authority moves funds from strategy → reserve.
+// Same as AllocateToStrategy but transfer goes the other direction.
+#[derive(Accounts)]
+pub struct DeallocateFromStrategy<'info> {
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+        constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    #[account(
+        mut,
+        constraint = strategy.vault == vault_state.key() @ VaultError::InvalidMint,
+    )]
+    pub strategy: Account<'info, StrategyAllocation>,
+
+    #[account(
+        constraint = token_mint.key() == vault_state.token_mint @ VaultError::InvalidMint,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_state,
+        associated_token::token_program = token_program,
+    )]
+    pub reserve_ata: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = strategy_token_account.key() == strategy.token_account @ VaultError::InvalidMint,
+    )]
+    pub strategy_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// Accounts for `update_strategy_delegate` — admin changes which protocol can spend.
+#[derive(Accounts)]
+pub struct UpdateStrategyDelegate<'info> {
+    pub admin: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+        constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    #[account(
+        mut,
+        constraint = strategy.vault == vault_state.key() @ VaultError::InvalidMint,
+        constraint = strategy.is_active @ VaultError::StrategyInactive,
+    )]
+    pub strategy: Account<'info, StrategyAllocation>,
+
+    #[account(
+        mut,
+        constraint = strategy_token_account.key() == strategy.token_account @ VaultError::InvalidMint,
+    )]
+    pub strategy_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: New delegate address. Just a pubkey, no validation needed.
+    pub new_delegate: UncheckedAccount<'info>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+// Accounts for `deactivate_strategy` — admin shuts down a strategy permanently.
+#[derive(Accounts)]
+pub struct DeactivateStrategy<'info> {
+    pub admin: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        bump = vault_state.bump,
+        constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    #[account(
+        mut,
+        constraint = strategy.vault == vault_state.key() @ VaultError::InvalidMint,
+        constraint = strategy.is_active @ VaultError::StrategyInactive,
+    )]
+    pub strategy: Account<'info, StrategyAllocation>,
+
+    #[account(
+        constraint = token_mint.key() == vault_state.token_mint @ VaultError::InvalidMint,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = strategy_token_account.key() == strategy.token_account @ VaultError::InvalidMint,
+    )]
+    pub strategy_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = vault_state,
+        associated_token::token_program = token_program,
+    )]
+    pub reserve_ata: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }
