@@ -1,0 +1,38 @@
+@import "@solana/wallet-adapter-react-ui/styles.css";
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #0f1118;
+  --color-surface-secondary: #1a1d2e;
+  --color-surface-hover: #242840;
+  --color-border: #2a2e45;
+  --color-accent: #14f195;
+  --color-accent-secondary: #9945ff;
+  --color-text-primary: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+/* Wallet adapter button overrides */
+.wallet-adapter-button {
+  background-color: var(--color-accent) !important;
+  color: #000 !important;
+  font-weight: 600 !important;
+  border-radius: 0.5rem !important;
+}
+
+.wallet-adapter-button:hover {
+  background-color: #12d985 !important;
+}
+
+.wallet-adapter-modal-wrapper {
+  background-color: var(--color-surface-secondary) !important;
+}

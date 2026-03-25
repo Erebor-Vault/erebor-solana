@@ -1,7 +1,37 @@
+# Anchor / Solana
 .anchor
-.DS_Store
 target
-**/*.rs.bk
-node_modules
 test-ledger
+**/*.rs.bk
+id.json
+on-chain.so
+
+# Dependencies
+node_modules
+app/node_modules
+agent/node_modules
 .yarn
+
+# Frontend
+app/.next
+app/.env.local
+app/out
+
+# Agent
+agent/.env
+agent/state.json
+agent/withdraw-signal.json
+
+# Build artifacts
+Cargo.lock
+
+# Claude Code
+.claude
+
+# System
+.DS_Store
+*.swp
+*.swo
+.env
+
+*.lock

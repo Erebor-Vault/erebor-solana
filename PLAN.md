@@ -168,19 +168,12 @@ Everything lives in a single file: `programs/my_project/src/lib.rs`
 
 ## Context & Problem
 
-We're **evolving** the existing counter program into a **vault**. The current code already has the core building blocks:
+**In simple words**: Users put their USDC into a shared pot. The pot gives them "receipt tokens" (shares). The vault admin can lend parts of the pot to different DeFi protocols to earn interest. When users want their USDC back, they return their receipts and get their share of the pot (including any profits earned).
 
-- `increment` = transfers tokens from user → PDA (same pattern as **deposit**)
-- `decrement` = transfers tokens from PDA → user using PDA signing with `with_signer()` (same pattern as **withdraw**)
-- Counter PDA with seeds `["counter", signer]` = same concept as VaultState PDA with seeds `["vault", token_mint]`
-- The `require!()` balance check = same pattern we'll use for vault validations
-
-**What the vault adds on top**:
+**Core features**:
 - Share tokens (mint on deposit, burn on withdraw) — so users get proportional ownership
 - Multiple strategy token accounts with delegates — so external protocols can use vault funds
 - Admin/authority role separation — so governance and operations are independent
-
-**In simple words**: Users put their USDC into a shared pot. The pot gives them "receipt tokens" (shares). The vault admin can lend parts of the pot to different DeFi protocols to earn interest. When users want their USDC back, they return their receipts and get their share of the pot (including any profits earned).
 
 **The 4 things this vault does**:
 
@@ -194,37 +187,6 @@ We're **evolving** the existing counter program into a **vault**. The current co
 On Solana, each token account can only have **one delegate** at a time (unlike ERC-20 where you can approve unlimited spenders). To allow multiple protocols to access vault funds, we create **separate token accounts** — one per strategy — each with its own delegate set to a different protocol. The vault PDA owns all these accounts and controls fund flow between them.
 
 **Think of it like this**: You can't give 3 people a key to the same safe. But you CAN create 3 safes, give one key each, and control how much money goes into each safe.
-
-### How existing counter code maps to vault
-
-```
-EXISTING CODE (lib.rs)                    VAULT EQUIVALENT
-─────────────────────                     ────────────────
-initialize()                          →   initialize_vault()
-  - Creates Counter PDA                   - Creates VaultState PDA + share mint + reserve ATA
-  - seeds=["counter", signer]             - seeds=["vault", token_mint]
-
-increment(amount)                      →   deposit(amount)
-  - User sends tokens to PDA              - User sends tokens to reserve ATA
-  - CPI transfer (user signs)             - CPI transfer_checked (user signs)
-  - counter.value += amount               - total_deposited += amount
-  - (no shares minted)                    - + CPI mint_to shares (vault PDA signs) ← NEW
-
-decrement(amount)                      →   withdraw(shares)
-  - PDA sends tokens back to user         - Reserve sends tokens back to user
-  - CPI transfer (PDA signs via seeds)    - CPI transfer_checked (vault PDA signs via seeds)
-  - counter.value -= amount               - total_deposited -= underlying
-  - (no shares burned)                    - + CPI burn shares (user signs) ← NEW
-
-(doesn't exist)                        →   create_strategy / allocate / deallocate / etc.
-                                           All NEW — strategy management layer on top
-```
-
-**Key reusable patterns from existing code**:
-- PDA creation with `init`, `seeds`, `bump` → same pattern for VaultState, StrategyAllocation
-- PDA signing with `with_signer(seeds)` in `decrement` → same pattern for all vault PDA-signed CPIs
-- `InterfaceAccount<'info, TokenAccount>` + `associated_token::` constraints → reused everywhere
-- `require!()` for balance checks → reused for all vault validations
 
 ### Solidity analogy
 
@@ -330,7 +292,7 @@ EXTERNAL PROTOCOL USES FUNDS:
 
 ## File Structure
 
-Everything in a single file, following the same pattern as the current counter program:
+Everything in a single file:
 
 ```
 programs/my_project/src/
@@ -690,9 +652,7 @@ token_interface::approve(cpi_ctx_with_signer, u64::MAX)?;
 
 ### Step 10: Evolve `lib.rs`
 
-**In simple words**: We keep the same file (`lib.rs`) and the same program ID. We replace the counter instructions (initialize, increment, decrement) with vault instructions. The patterns stay the same — PDA creation, token transfers, PDA signing — we just add share minting/burning and strategy management on top.
-
-Replace the current counter code. All instructions, account structs, data structs, and errors go in one file:
+All vault instructions, account structs, data structs, and errors live in one file:
 
 ```rust
 use anchor_lang::prelude::*;
@@ -777,7 +737,7 @@ let cpi_ctx = CpiContext::new_with_signer(token_program, accounts, signer_seeds)
 
 | File | Action |
 |---|---|
-| `programs/my_project/src/lib.rs` | Rewrite — replace counter code with all vault instructions, account structs, data structs, and errors in one file |
+| `programs/my_project/src/lib.rs` | All vault instructions, account structs, data structs, and errors in one file |
 | `programs/my_project/Cargo.toml` | No changes needed (anchor-spl 0.32.1 has everything) |
 | `tests/my_project.ts` | Full rewrite with vault test suites |
 
