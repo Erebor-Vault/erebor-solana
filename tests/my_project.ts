@@ -131,7 +131,7 @@ describe("my_project", () => {
       // Seeds ["vault", token_mint] ensure one vault per token type.
       // findProgramAddressSync returns [address, bump] — bump is used for signing.
       [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mint.toBuffer()],
+        [Buffer.from("vault"), mint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
         program.programId
       );
 
@@ -158,7 +158,7 @@ describe("my_project", () => {
     // After this, the vault is ready to accept deposits.
     it("initialize_vault — creates vault, share mint, and reserve", async () => {
       const tx = await program.methods
-        .initializeVault()
+        .initializeVault(new BN(0))
         .accountsStrict({
           admin: admin.publicKey,
           vaultState: vaultPda,
@@ -922,7 +922,7 @@ describe("my_project", () => {
       await mintTokensAndConfirm(mint, user2TokenAccount, 10_000_000);
 
       [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mint.toBuffer()],
+        [Buffer.from("vault"), mint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
         program.programId
       );
       [shareMintPda] = PublicKey.findProgramAddressSync(
@@ -938,7 +938,7 @@ describe("my_project", () => {
     it("full lifecycle: init → deposits + rebalance → weight change + rebalance → withdrawals → empty", async () => {
       // 1. Initialize vault
       await program.methods
-        .initializeVault()
+        .initializeVault(new BN(0))
         .accountsStrict({
           admin: admin.publicKey,
           vaultState: vaultPda,
@@ -1209,7 +1209,7 @@ describe("my_project", () => {
       await mintTokensAndConfirm(mint, user2TokenAccount, 10_000_000);
 
       [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mint.toBuffer()],
+        [Buffer.from("vault"), mint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
         program.programId
       );
       [shareMintPda] = PublicKey.findProgramAddressSync(
@@ -1225,7 +1225,7 @@ describe("my_project", () => {
     it("yield simulation: share price increases when tokens are sent directly to reserve", async () => {
       // 1. Init vault
       await program.methods
-        .initializeVault()
+        .initializeVault(new BN(0))
         .accountsStrict({
           admin: admin.publicKey,
           vaultState: vaultPda,
@@ -1454,7 +1454,7 @@ describe("my_project", () => {
       await mintTokensAndConfirm(mint, user1TokenAccount, 20_000_000);
 
       [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mint.toBuffer()],
+        [Buffer.from("vault"), mint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
         program.programId
       );
       [shareMintPda] = PublicKey.findProgramAddressSync(
@@ -1470,7 +1470,7 @@ describe("my_project", () => {
     it("multiple strategies: create 3, set weights, deposit + rebalance, weight change, deactivate", async () => {
       // 1. Init vault
       await program.methods
-        .initializeVault()
+        .initializeVault(new BN(0))
         .accountsStrict({
           admin: admin.publicKey,
           vaultState: vaultPda,
@@ -1716,7 +1716,7 @@ describe("my_project", () => {
       await mintTokensAndConfirm(mint, user1TokenAccount, 10_000_000);
 
       [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mint.toBuffer()],
+        [Buffer.from("vault"), mint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
         program.programId
       );
       [shareMintPda] = PublicKey.findProgramAddressSync(
@@ -1732,7 +1732,7 @@ describe("my_project", () => {
       // After setup: reserve=2M, strategy=6M, total_deposited=8M.
       // Uses 75% weight + rebalance to achieve this split.
       await program.methods
-        .initializeVault()
+        .initializeVault(new BN(0))
         .accountsStrict({
           admin: admin.publicKey,
           vaultState: vaultPda,
@@ -2176,7 +2176,7 @@ describe("my_project", () => {
       await mintTokensAndConfirm(mint, user2TokenAccount, 20_000_000);
 
       [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mint.toBuffer()],
+        [Buffer.from("vault"), mint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
         program.programId
       );
       [shareMintPda] = PublicKey.findProgramAddressSync(
@@ -2190,7 +2190,7 @@ describe("my_project", () => {
 
       // Initialize vault
       await program.methods
-        .initializeVault()
+        .initializeVault(new BN(0))
         .accountsStrict({
           admin: admin.publicKey,
           vaultState: vaultPda,

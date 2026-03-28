@@ -143,7 +143,7 @@ async function main() {
   const program = anchor.workspace.myProject as Program<MyProject>;
 
   const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), TOKEN_MINT.toBuffer()],
+    [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
     program.programId
   );
 

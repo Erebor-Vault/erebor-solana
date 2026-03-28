@@ -18,7 +18,7 @@ my_project = "6B8tT1EzLMKUZ5fF5H8cTs4We1vLabVeZtgCnB4Ccmnq"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "./id.json"
 
 [scripts]

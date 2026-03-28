@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { VaultList } from "@/components/vault/VaultList";
 import { VaultStats } from "@/components/vault/VaultStats";
 import { UserPosition } from "@/components/vault/UserPosition";
 import { DepositForm } from "@/components/vault/DepositForm";
 import { WithdrawForm } from "@/components/vault/WithdrawForm";
+import { useVault } from "@/components/providers/VaultProvider";
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
+  const { activeEntry } = useVault();
 
   return (
     <div className="space-y-8">
@@ -16,6 +19,15 @@ export default function DashboardPage() {
         <p className="text-[var(--color-text-secondary)]">
           Deposit tokens to earn yield from multi-strategy allocations
         </p>
+      </div>
+
+      <VaultList />
+
+      <div className="flex items-center gap-2 mb-2">
+        <h2 className="text-lg font-semibold">{activeEntry.name}</h2>
+        <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-0.5 text-xs font-medium">
+          {activeEntry.tokenSymbol}
+        </span>
       </div>
 
       <VaultStats />

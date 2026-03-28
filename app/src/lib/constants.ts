@@ -34,9 +34,37 @@ export function getRpcUrl(): string {
 export function getTokenMint(): PublicKey {
   const mint = process.env.NEXT_PUBLIC_TOKEN_MINT;
   if (mint) return new PublicKey(mint);
-  // Default: devnet USDC
-  return new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+  // Default: first vault in registry
+  return VAULT_REGISTRY[0].tokenMint;
 }
+
+// -------------------------------------------------------------------
+// Vault Registry — add new vaults here
+// -------------------------------------------------------------------
+export interface VaultEntry {
+  name: string;
+  tokenMint: PublicKey;
+  tokenSymbol: string;
+  tokenDecimals: number;
+  vaultId: number;
+}
+
+export const VAULT_REGISTRY: VaultEntry[] = [
+  {
+    name: "Test Token Vault",
+    tokenMint: new PublicKey("6zrRz3TtZqfZuHmpzC5ZCVM99HoZ6wq6ptNN6d5nwTBR"),
+    tokenSymbol: "TEST",
+    tokenDecimals: 6,
+    vaultId: 0,
+  },
+  // Add more vaults here:
+  // {
+  //   name: "USDC Vault",
+  //   tokenMint: new PublicKey("..."),
+  //   tokenSymbol: "USDC",
+  //   tokenDecimals: 6,
+  // },
+];
 
 export function getExplorerUrl(
   address: string,

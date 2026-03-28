@@ -36,7 +36,7 @@ pub mod my_project {
     //   2. Share Mint PDA — a new token that represents ownership of the vault
     //   3. Reserve ATA — the main token account where deposits land
     // Whoever calls this becomes the admin AND authority.
-    pub fn initialize_vault(ctx: Context<InitializeVault>) -> Result<()> {
+    pub fn initialize_vault(ctx: Context<InitializeVault>, vault_id: u64) -> Result<()> {
         msg!("Initializing vault for mint: {:?}", ctx.accounts.token_mint.key());
 
         // Populate the vault state
@@ -45,6 +45,7 @@ pub mod my_project {
         vault.authority = ctx.accounts.admin.key(); // defaults to admin, can be changed later
         vault.token_mint = ctx.accounts.token_mint.key();
         vault.share_mint = ctx.accounts.share_mint.key();
+        vault.vault_id = vault_id;
         vault.total_deposited = 0;
         vault.strategy_count = 0;
         vault.bump = ctx.bumps.vault_state;
@@ -98,8 +99,9 @@ pub mod my_project {
         // CPI 2: Mint share tokens to user.
         // The vault PDA is the mint authority — it signs using with_signer.
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         let mint_accounts = MintTo {
             mint: ctx.accounts.share_mint.to_account_info(),
@@ -163,8 +165,9 @@ pub mod my_project {
         // CPI 2: Transfer underlying tokens from reserve → user.
         // Vault PDA signs via with_signer.
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         let cpi_accounts = anchor_spl::token::Transfer {
             from: ctx.accounts.reserve_ata.to_account_info(),
@@ -216,8 +219,9 @@ pub mod my_project {
         // Vault PDA signs.
         // u64::MAX = unlimited allowance. Risk is controlled by how much we allocate, not the approval.
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         let approve_accounts = Approve {
             to: ctx.accounts.strategy_token_account.to_account_info(),
@@ -250,8 +254,9 @@ pub mod my_project {
 
         // Vault PDA signs the transfer — same pattern as withdraw
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         let cpi_accounts = anchor_spl::token::Transfer {
             from: ctx.accounts.reserve_ata.to_account_info(),
@@ -279,8 +284,9 @@ pub mod my_project {
 
         // Vault PDA signs — it's the authority on both accounts
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         let cpi_accounts = anchor_spl::token::Transfer {
             from: ctx.accounts.strategy_token_account.to_account_info(),
@@ -305,8 +311,9 @@ pub mod my_project {
     // Two CPIs: revoke old delegate, approve new one. Same PDA signing pattern.
     pub fn update_strategy_delegate(ctx: Context<UpdateStrategyDelegate>) -> Result<()> {
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         // Revoke old delegate
         let revoke_accounts = Revoke {
@@ -376,8 +383,9 @@ pub mod my_project {
     // Revokes delegate, pulls all remaining funds back to reserve, marks inactive.
     pub fn deactivate_strategy(ctx: Context<DeactivateStrategy>) -> Result<()> {
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         // Revoke delegate access
         let revoke_accounts = Revoke {
@@ -464,6 +472,7 @@ pub mod my_project {
         let current = ctx.accounts.strategy.allocated_amount;
         let total_deposited = ctx.accounts.vault_state.total_deposited;
         let token_mint_key = ctx.accounts.vault_state.token_mint;
+        let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
         let bump = ctx.accounts.vault_state.bump;
 
         // u128 intermediate to prevent overflow on large deposits
@@ -478,7 +487,7 @@ pub mod my_project {
             return Ok(());
         }
 
-        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
         if target_amount > current {
             // Allocate more: reserve → strategy
@@ -581,18 +590,19 @@ pub enum VaultError {
 
 // Accounts for `initialize_vault` — creates the vault infrastructure.
 #[derive(Accounts)]
+#[instruction(vault_id: u64)]
 pub struct InitializeVault<'info> {
     // The admin who pays for account creation. Becomes vault admin + authority.
     #[account(mut)]
     pub admin: Signer<'info>,
 
     // The vault's main config PDA.
-    // Seeds use token_mint so there's one vault per token type.
+    // Seeds use token_mint + vault_id so multiple vaults can exist per token type.
     #[account(
         init,
         payer = admin,
         space = 8 + VaultState::INIT_SPACE,
-        seeds = [b"vault", token_mint.key().as_ref()],
+        seeds = [b"vault", token_mint.key().as_ref(), &vault_id.to_le_bytes()],
         bump,
     )]
     pub vault_state: Account<'info, VaultState>,
@@ -643,7 +653,7 @@ pub struct Deposit<'info> {
     // Seeds validated to ensure we're using the correct vault.
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
     )]
     pub vault_state: Account<'info, VaultState>,
@@ -704,7 +714,7 @@ pub struct Withdraw<'info> {
     // The vault config — mut because we update total_deposited.
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
     )]
     pub vault_state: Account<'info, VaultState>,
@@ -766,7 +776,7 @@ pub struct CreateStrategy<'info> {
 
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
     )]
@@ -815,7 +825,7 @@ pub struct AllocateToStrategy<'info> {
     pub authority: Signer<'info>,
 
     #[account(
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
     )]
@@ -859,7 +869,7 @@ pub struct DeallocateFromStrategy<'info> {
     pub authority: Signer<'info>,
 
     #[account(
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
     )]
@@ -899,7 +909,7 @@ pub struct UpdateStrategyDelegate<'info> {
     pub admin: Signer<'info>,
 
     #[account(
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
     )]
@@ -932,7 +942,7 @@ pub struct ReportYield<'info> {
 
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
     )]
@@ -958,7 +968,7 @@ pub struct DeactivateStrategy<'info> {
 
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
     )]
@@ -1000,7 +1010,7 @@ pub struct TransferAdmin<'info> {
 
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
     )]
@@ -1014,7 +1024,7 @@ pub struct SetAuthority<'info> {
 
     #[account(
         mut,
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
     )]
@@ -1027,7 +1037,7 @@ pub struct SetStrategyWeight<'info> {
     pub admin: Signer<'info>,
 
     #[account(
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.admin == admin.key() @ VaultError::UnauthorizedAdmin,
     )]
@@ -1048,7 +1058,7 @@ pub struct RebalanceStrategy<'info> {
     pub authority: Signer<'info>,
 
     #[account(
-        seeds = [b"vault", vault_state.token_mint.as_ref()],
+        seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
         constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
     )]
@@ -1112,6 +1122,10 @@ pub struct VaultState {
     /// Only this program can mint/burn shares (vault PDA = mint authority).
     pub share_mint: Pubkey, // 32 bytes
 
+    /// Unique vault ID — allows multiple vaults for the same token mint.
+    /// Included in the PDA seeds: ["vault", token_mint, vault_id].
+    pub vault_id: u64, // 8 bytes
+
     /// Total underlying tokens in the vault (reserve + all strategies).
     /// This is the ACCOUNTING total — doesn't change when funds move to strategies.
     /// Only changes on deposit (+) and withdraw (-).
@@ -1128,8 +1142,8 @@ pub struct VaultState {
     /// PDA bump for the share_mint account.
     pub share_mint_bump: u8, // 1 byte
 }
-// Total: 32*4 + 8*2 + 1*2 = 146 bytes
-// On-chain space: 8 (discriminator) + 146 = 154 bytes
+// Total: 32*4 + 8*3 + 1*2 = 154 bytes
+// On-chain space: 8 (discriminator) + 154 = 162 bytes
 
 /// StrategyAllocation — metadata for a single strategy.
 ///

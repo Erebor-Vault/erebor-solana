@@ -6,9 +6,9 @@ import {
 import BN from "bn.js";
 import { PROGRAM_ID } from "./constants";
 
-export function deriveVaultPda(tokenMint: PublicKey): PublicKey {
+export function deriveVaultPda(tokenMint: PublicKey, vaultId: number = 0): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), tokenMint.toBuffer()],
+    [Buffer.from("vault"), tokenMint.toBuffer(), new BN(vaultId).toArrayLike(Buffer, "le", 8)],
     PROGRAM_ID
   );
   return pda;

@@ -48,6 +48,11 @@ export type MyProject = {
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
               }
             ]
           }
@@ -167,6 +172,11 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "vaultState"
               }
             ]
@@ -290,6 +300,11 @@ export type MyProject = {
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
               }
             ]
           }
@@ -402,6 +417,11 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "vaultState"
               }
             ]
@@ -522,6 +542,11 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "vaultState"
               }
             ]
@@ -760,6 +785,10 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "tokenMint"
+              },
+              {
+                "kind": "arg",
+                "path": "vaultId"
               }
             ]
           }
@@ -859,7 +888,12 @@ export type MyProject = {
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "vaultId",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "rebalanceStrategy",
@@ -895,6 +929,11 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "vaultState"
               }
             ]
@@ -1010,6 +1049,11 @@ export type MyProject = {
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
               }
             ]
           }
@@ -1023,6 +1067,59 @@ export type MyProject = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "setAuthority",
+      "discriminator": [
+        133,
+        250,
+        37,
+        21,
+        110,
+        163,
+        26,
+        121
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "newAuthority",
+          "type": "pubkey"
+        }
+      ]
     },
     {
       "name": "setStrategyWeight",
@@ -1059,6 +1156,11 @@ export type MyProject = {
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
               }
             ]
           }
@@ -1072,6 +1174,59 @@ export type MyProject = {
         {
           "name": "weightBps",
           "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "transferAdmin",
+      "discriminator": [
+        42,
+        242,
+        66,
+        106,
+        228,
+        10,
+        111,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "newAdmin",
+          "type": "pubkey"
         }
       ]
     },
@@ -1109,6 +1264,11 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "vaultState"
               }
             ]
@@ -1167,6 +1327,11 @@ export type MyProject = {
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "vaultState"
               }
             ]
@@ -1566,6 +1731,14 @@ export type MyProject = {
               "Only this program can mint/burn shares (vault PDA = mint authority)."
             ],
             "type": "pubkey"
+          },
+          {
+            "name": "vaultId",
+            "docs": [
+              "Unique vault ID — allows multiple vaults for the same token mint.",
+              "Included in the PDA seeds: [\"vault\", token_mint, vault_id]."
+            ],
+            "type": "u64"
           },
           {
             "name": "totalDeposited",

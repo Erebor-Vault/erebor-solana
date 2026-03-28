@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import { getCluster } from "@/lib/constants";
+import { VaultSelector } from "./VaultSelector";
 
 const WalletMultiButton = dynamic(
   () =>
@@ -48,6 +49,7 @@ export function Navbar() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <VaultSelector />
           <span className="rounded-full bg-[var(--color-surface-hover)] px-3 py-1 text-xs font-medium text-[var(--color-accent)]">
             {cluster === "devnet" ? "Devnet" : "Mainnet"}
           </span>

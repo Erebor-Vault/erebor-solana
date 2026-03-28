@@ -20,6 +20,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
+import BN from "bn.js";
 
 // -------------------------------------------------------------------
 // Parse CLI args
@@ -100,7 +101,7 @@ async function main() {
 
   // Derive PDAs
   const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), tokenMint.toBuffer()],
+    [Buffer.from("vault"), tokenMint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
     program.programId
   );
 
@@ -148,7 +149,7 @@ async function main() {
   console.log("\nSending initialize_vault transaction...");
 
   const tx = await program.methods
-    .initializeVault()
+    .initializeVault(new BN(0))
     .accountsStrict({
       admin: walletKeypair.publicKey,
       vaultState: vaultPda,

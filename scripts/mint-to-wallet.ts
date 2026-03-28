@@ -118,7 +118,7 @@ async function main() {
   // -------------------------------------------------------------------
   console.log("\n3. Initializing vault...");
   const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), tokenMint.toBuffer()],
+    [Buffer.from("vault"), tokenMint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
     program.programId
   );
   const [shareMintPda] = PublicKey.findProgramAddressSync(
@@ -131,7 +131,7 @@ async function main() {
   });
 
   await program.methods
-    .initializeVault()
+    .initializeVault(new BN(0))
     .accountsStrict({
       admin: payer.publicKey,
       vaultState: vaultPda,

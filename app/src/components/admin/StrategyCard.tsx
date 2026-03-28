@@ -117,6 +117,23 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
         )}
       </div>
 
+      {/* Report Yield — always visible when there's unreported yield */}
+      {strategy.isActive && unreportedYield > 0 && (
+        <div className="mt-3">
+          <button
+            onClick={() =>
+              handleAction(() =>
+                reportYield(strategy.strategyId.toNumber(), strategy.tokenAccount)
+              )
+            }
+            disabled={actionLoading}
+            className="w-full rounded-lg bg-[var(--color-success)]/20 px-4 py-2 text-sm font-medium text-[var(--color-success)] disabled:opacity-50"
+          >
+            Report Yield (+{formatTokenAmount(unreportedYield)} USDC)
+          </button>
+        </div>
+      )}
+
       {showActions && strategy.isActive && (
         <div className="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
           {/* Set Weight */}
@@ -167,19 +184,6 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
           )}
 
           <div className="flex gap-2">
-            {unreportedYield > 0 && (
-              <button
-                onClick={() =>
-                  handleAction(() =>
-                    reportYield(strategy.strategyId.toNumber(), strategy.tokenAccount)
-                  )
-                }
-                disabled={actionLoading}
-                className="flex-1 rounded-lg bg-[var(--color-success)]/20 px-4 py-2 text-sm font-medium text-[var(--color-success)] disabled:opacity-50"
-              >
-                Report Yield (+{formatTokenAmount(unreportedYield)})
-              </button>
-            )}
             <button
               onClick={() => {
                 if (confirm("Deactivate this strategy permanently?"))

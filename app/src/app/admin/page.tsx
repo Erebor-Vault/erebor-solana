@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AdminGuard } from "@/components/admin/AdminGuard";
+import { VaultList } from "@/components/vault/VaultList";
 import { StrategyList } from "@/components/admin/StrategyList";
 import { CreateStrategyForm } from "@/components/admin/CreateStrategyForm";
 import { AllocationChart } from "@/components/admin/AllocationChart";
@@ -20,7 +21,7 @@ export default function AdminPage() {
 }
 
 function AdminContent() {
-  const { vault } = useVault();
+  const { vault, activeEntry } = useVault();
   const { strategies, refresh } = useStrategies();
   const { rebalanceAll, loading: rebalanceLoading } = useAuthorityActions();
   const [rebalancing, setRebalancing] = useState(false);
@@ -54,9 +55,23 @@ function AdminContent() {
 
   return (
     <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold mb-1">Admin Panel</h1>
+        <p className="text-[var(--color-text-secondary)]">
+          Manage vault strategies and rebalancing
+        </p>
+      </div>
+
+      <VaultList />
+
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Admin Panel</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-lg font-semibold">{activeEntry.name}</h2>
+            <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-0.5 text-xs font-medium">
+              {activeEntry.tokenSymbol}
+            </span>
+          </div>
           {vault && (
             <p className="text-sm text-[var(--color-text-secondary)]">
               Admin: {truncateAddress(vault.admin.toBase58())} · Authority:{" "}

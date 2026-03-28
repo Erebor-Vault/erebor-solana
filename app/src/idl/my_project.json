@@ -42,6 +42,11 @@
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "VaultState"
               }
             ]
           }
@@ -161,6 +166,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -284,6 +294,11 @@
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "VaultState"
               }
             ]
           }
@@ -396,6 +411,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -516,6 +536,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -754,6 +779,10 @@
               {
                 "kind": "account",
                 "path": "token_mint"
+              },
+              {
+                "kind": "arg",
+                "path": "vault_id"
               }
             ]
           }
@@ -853,7 +882,12 @@
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "rebalance_strategy",
@@ -889,6 +923,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -1004,6 +1043,11 @@
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "VaultState"
               }
             ]
           }
@@ -1054,6 +1098,11 @@
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "VaultState"
               }
             ]
           }
@@ -1100,6 +1149,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -1153,6 +1207,11 @@
                 "kind": "account",
                 "path": "vault_state.token_mint",
                 "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "VaultState"
               }
             ]
           }
@@ -1199,6 +1258,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -1257,6 +1321,11 @@
               {
                 "kind": "account",
                 "path": "vault_state.token_mint",
+                "account": "VaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
                 "account": "VaultState"
               }
             ]
@@ -1656,6 +1725,14 @@
               "Only this program can mint/burn shares (vault PDA = mint authority)."
             ],
             "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "docs": [
+              "Unique vault ID — allows multiple vaults for the same token mint.",
+              "Included in the PDA seeds: [\"vault\", token_mint, vault_id]."
+            ],
+            "type": "u64"
           },
           {
             "name": "total_deposited",
