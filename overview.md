@@ -1,8 +1,8 @@
-# Sol-Vault — Solana Yield Vault with Multi-Strategy Delegation
+# Erebor — Solana Yield Vault with Multi-Strategy Delegation
 
-## What is Sol-Vault?
+## What is Erebor?
 
-Sol-Vault is a Solana program that implements a **yield-optimized vault** — users deposit tokens (e.g., USDC), receive proportional share tokens, and the vault admin can delegate portions of the funds to external DeFi protocols (lending, LPing) via **strategies** to earn yield.
+Erebor is a Solana program that implements a **yield-optimized vault** — users deposit tokens (e.g., USDC), receive proportional share tokens, and the vault admin can delegate portions of the funds to external DeFi protocols (lending, LPing) via **strategies** to earn yield.
 
 Think of it like an **ERC-4626 vault on Solana**, with a multi-strategy delegation layer on top.
 
