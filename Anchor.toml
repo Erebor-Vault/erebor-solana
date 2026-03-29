@@ -6,19 +6,19 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-my_project = "6B8tT1EzLMKUZ5fF5H8cTs4We1vLabVeZtgCnB4Ccmnq"
+my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 
 [programs.localnet]
-my_project = "4VgPkuQSgqvaBaE7X5ZyUFeMPRMj7yAa8cgsi22ZTvik"
+my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 
 [programs.mainnet]
-my_project = "6B8tT1EzLMKUZ5fF5H8cTs4We1vLabVeZtgCnB4Ccmnq"
+my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "./id.json"
 
 [scripts]

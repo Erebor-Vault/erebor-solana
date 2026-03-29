@@ -37,8 +37,8 @@ export function AllocationChart() {
       <h3 className="text-sm font-medium text-[var(--color-text-secondary)] mb-4">
         Fund Allocation
       </h3>
-      <div className="h-64">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="h-64" style={{ minWidth: 0, minHeight: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
           <PieChart>
             <Pie
               data={data}

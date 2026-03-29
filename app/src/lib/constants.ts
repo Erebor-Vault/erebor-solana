@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 export const PROGRAM_ID = new PublicKey(
-  "4VgPkuQSgqvaBaE7X5ZyUFeMPRMj7yAa8cgsi22ZTvik"
+  "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 );
 
 export const CLUSTERS = {
@@ -26,9 +26,7 @@ export function getCluster(): ClusterName {
 }
 
 export function getRpcUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_RPC_URL || CLUSTERS[getCluster()].url
-  );
+  return process.env.NEXT_PUBLIC_RPC_URL || CLUSTERS[getCluster()].url;
 }
 
 export function getTokenMint(): PublicKey {
@@ -51,19 +49,40 @@ export interface VaultEntry {
 
 export const VAULT_REGISTRY: VaultEntry[] = [
   {
-    name: "Test Token Vault",
-    tokenMint: new PublicKey("6zrRz3TtZqfZuHmpzC5ZCVM99HoZ6wq6ptNN6d5nwTBR"),
-    tokenSymbol: "TEST",
+    name: "AT trader agent",
+    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 0,
   },
-  // Add more vaults here:
-  // {
-  //   name: "USDC Vault",
-  //   tokenMint: new PublicKey("..."),
-  //   tokenSymbol: "USDC",
-  //   tokenDecimals: 6,
-  // },
+  {
+    name: "Conservative",
+    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenSymbol: "USDC",
+    tokenDecimals: 6,
+    vaultId: 1,
+  },
+  {
+    name: "Aggressive Vault",
+    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenSymbol: "USDC",
+    tokenDecimals: 6,
+    vaultId: 2,
+  },
+  {
+    name: "Stablecoin Yield",
+    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenSymbol: "USDC",
+    tokenDecimals: 6,
+    vaultId: 3,
+  },
+  {
+    name: "DeFi Alpha",
+    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenSymbol: "USDC",
+    tokenDecimals: 6,
+    vaultId: 4,
+  },
 ];
 
 export function getExplorerUrl(

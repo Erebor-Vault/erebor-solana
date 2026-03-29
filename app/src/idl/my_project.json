@@ -1,5 +1,5 @@
 {
-  "address": "4VgPkuQSgqvaBaE7X5ZyUFeMPRMj7yAa8cgsi22ZTvik",
+  "address": "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B",
   "metadata": {
     "name": "my_project",
     "version": "0.1.0",
@@ -903,7 +903,7 @@
       ],
       "accounts": [
         {
-          "name": "authority",
+          "name": "payer",
           "signer": true
         },
         {

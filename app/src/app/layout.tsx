@@ -6,7 +6,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sol Vault",
+  title: "Erebor",
   description: "Solana multi-strategy yield vault",
 };
 

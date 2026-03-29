@@ -41,34 +41,35 @@ export function useStrategies() {
         },
       ]);
 
-      const strategiesWithBalances = await Promise.all(
-        accounts.map(async (acc: any) => {
-          let actualBalance = new BN(0);
-          try {
-            const balInfo = await connection.getTokenAccountBalance(
-              acc.account.tokenAccount
-            );
-            actualBalance = new BN(balInfo.value.amount);
-          } catch {
-            // Token account may not exist yet
-          }
-
-          return {
-            publicKey: acc.publicKey,
-            vault: acc.account.vault,
-            strategyId: acc.account.strategyId,
-            delegate: acc.account.delegate,
-            allocatedAmount: acc.account.allocatedAmount,
-            tokenAccount: acc.account.tokenAccount,
-            isActive: acc.account.isActive,
-            targetWeightBps: acc.account.targetWeightBps ?? 0,
-            actualBalance,
-          } as StrategyData;
-        })
+      // Batch-fetch all token account balances using getMultipleAccountsInfo
+      const tokenAccountKeys = accounts.map(
+        (acc: any) => acc.account.tokenAccount as PublicKey
       );
+      const balanceInfos = await connection.getMultipleAccountsInfo(tokenAccountKeys);
+
+      const strategiesWithBalances = accounts.map((acc: any, i: number) => {
+        let actualBalance = new BN(0);
+        const info = balanceInfos[i];
+        if (info?.data && info.data.length >= 72) {
+          // SPL token account: amount is at offset 64, 8 bytes LE
+          actualBalance = new BN(info.data.subarray(64, 72), "le");
+        }
+
+        return {
+          publicKey: acc.publicKey,
+          vault: acc.account.vault,
+          strategyId: acc.account.strategyId,
+          delegate: acc.account.delegate,
+          allocatedAmount: acc.account.allocatedAmount,
+          tokenAccount: acc.account.tokenAccount,
+          isActive: acc.account.isActive,
+          targetWeightBps: acc.account.targetWeightBps ?? 0,
+          actualBalance,
+        } as StrategyData;
+      });
 
       // Sort by strategy ID
-      strategiesWithBalances.sort((a, b) =>
+      strategiesWithBalances.sort((a: StrategyData, b: StrategyData) =>
         a.strategyId.sub(b.strategyId).toNumber()
       );
 
@@ -82,7 +83,7 @@ export function useStrategies() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 15000);
+    const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
   }, [refresh]);
 

@@ -52,12 +52,12 @@ On Solana, each token account can only have **one delegate** at a time. To allow
 
 ### Roles
 
-| Role | Who | Can do |
-|------|-----|--------|
-| **Admin** | Set at vault init | Create/deactivate strategies, change delegates |
-| **Authority** | Defaults to admin | Allocate/deallocate funds between reserve and strategies |
-| **User** | Anyone | Deposit tokens, withdraw by burning shares |
-| **Delegate** | External protocol/agent | Spend tokens from its assigned strategy token account |
+| Role          | Who                     | Can do                                                   |
+| ------------- | ----------------------- | -------------------------------------------------------- |
+| **Admin**     | Set at vault init       | Create/deactivate strategies, change delegates           |
+| **Authority** | Defaults to admin       | Allocate/deallocate funds between reserve and strategies |
+| **User**      | Anyone                  | Deposit tokens, withdraw by burning shares               |
+| **Delegate**  | External protocol/agent | Spend tokens from its assigned strategy token account    |
 
 ---
 
@@ -65,28 +65,28 @@ On Solana, each token account can only have **one delegate** at a time. To allow
 
 ### Vault Operations
 
-| Instruction | Description | Signer |
-|-------------|-------------|--------|
-| `initialize_vault` | Create vault state + share mint + reserve ATA | Admin |
-| `deposit(amount)` | Transfer tokens to reserve, mint proportional shares | User |
-| `withdraw(shares_to_burn)` | Burn shares, receive proportional underlying tokens | User |
+| Instruction                | Description                                          | Signer |
+| -------------------------- | ---------------------------------------------------- | ------ |
+| `initialize_vault`         | Create vault state + share mint + reserve ATA        | Admin  |
+| `deposit(amount)`          | Transfer tokens to reserve, mint proportional shares | User   |
+| `withdraw(shares_to_burn)` | Burn shares, receive proportional underlying tokens  | User   |
 
 ### Strategy Operations
 
-| Instruction | Description | Signer |
-|-------------|-------------|--------|
-| `create_strategy` | Create strategy PDA + token account, approve delegate | Admin |
-| `allocate_to_strategy(amount)` | Move tokens: reserve -> strategy token account | Authority |
-| `deallocate_from_strategy(amount)` | Move tokens: strategy token account -> reserve | Authority |
-| `update_strategy_delegate` | Revoke old delegate, approve new one | Admin |
-| `deactivate_strategy` | Revoke delegate, return funds, mark inactive (permanent) | Admin |
+| Instruction                        | Description                                              | Signer    |
+| ---------------------------------- | -------------------------------------------------------- | --------- |
+| `create_strategy`                  | Create strategy PDA + token account, approve delegate    | Admin     |
+| `allocate_to_strategy(amount)`     | Move tokens: reserve -> strategy token account           | Authority |
+| `deallocate_from_strategy(amount)` | Move tokens: strategy token account -> reserve           | Authority |
+| `update_strategy_delegate`         | Revoke old delegate, approve new one                     | Admin     |
+| `deactivate_strategy`              | Revoke delegate, return funds, mark inactive (permanent) | Admin     |
 
 ### Rebalancing Operations
 
-| Instruction | Description | Signer |
-|-------------|-------------|--------|
-| `set_strategy_weight(weight_bps)` | Set target allocation weight for a strategy (basis points, 0–10000) | Admin |
-| `rebalance_strategy` | Move funds to/from strategy to match its target weight | Authority |
+| Instruction                       | Description                                                         | Signer    |
+| --------------------------------- | ------------------------------------------------------------------- | --------- |
+| `set_strategy_weight(weight_bps)` | Set target allocation weight for a strategy (basis points, 0–10000) | Admin     |
+| `rebalance_strategy`              | Move funds to/from strategy to match its target weight              | Authority |
 
 **How rebalancing works:**
 
@@ -114,40 +114,41 @@ If the vault earns yield (total_deposited grows), existing shares become worth m
 
 ## On-Chain Accounts
 
-### VaultState (146 bytes)
+### VaultState (154 bytes)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `admin` | Pubkey | Can manage strategies |
-| `authority` | Pubkey | Can allocate/deallocate funds |
-| `token_mint` | Pubkey | Accepted deposit token (e.g., USDC) |
-| `share_mint` | Pubkey | Vault's share token mint |
-| `total_deposited` | u64 | Total assets under management |
-| `strategy_count` | u64 | Auto-incrementing strategy ID |
-| `bump` | u8 | PDA bump |
-| `share_mint_bump` | u8 | Share mint PDA bump |
+| Field             | Type   | Description                                             |
+| ----------------- | ------ | ------------------------------------------------------- |
+| `admin`           | Pubkey | Can manage strategies                                   |
+| `authority`       | Pubkey | Can allocate/deallocate funds                           |
+| `token_mint`      | Pubkey | Accepted deposit token (e.g., USDC)                     |
+| `share_mint`      | Pubkey | Vault's share token mint                                |
+| `vault_id`        | u64    | Unique vault ID — allows multiple vaults per token mint |
+| `total_deposited` | u64    | Total assets under management                           |
+| `strategy_count`  | u64    | Auto-incrementing strategy ID                           |
+| `bump`            | u8     | PDA bump                                                |
+| `share_mint_bump` | u8     | Share mint PDA bump                                     |
 
 ### StrategyAllocation (116 bytes)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `vault` | Pubkey | Back-reference to VaultState |
-| `strategy_id` | u64 | Unique sequential ID |
-| `delegate` | Pubkey | Approved external spender |
-| `allocated_amount` | u64 | Tokens currently in strategy |
-| `token_account` | Pubkey | Strategy's token account PDA |
-| `is_active` | bool | Once false, permanently disabled |
-| `target_weight_bps` | u16 | Target allocation weight in basis points (0–10000). Used by `rebalance_strategy` |
-| `bump` | u8 | PDA bump |
+| Field               | Type   | Description                                                                      |
+| ------------------- | ------ | -------------------------------------------------------------------------------- |
+| `vault`             | Pubkey | Back-reference to VaultState                                                     |
+| `strategy_id`       | u64    | Unique sequential ID                                                             |
+| `delegate`          | Pubkey | Approved external spender                                                        |
+| `allocated_amount`  | u64    | Tokens currently in strategy                                                     |
+| `token_account`     | Pubkey | Strategy's token account PDA                                                     |
+| `is_active`         | bool   | Once false, permanently disabled                                                 |
+| `target_weight_bps` | u16    | Target allocation weight in basis points (0–10000). Used by `rebalance_strategy` |
+| `bump`              | u8     | PDA bump                                                                         |
 
 ### PDA Seeds
 
-| Account | Seeds |
-|---------|-------|
-| Vault State | `["vault", token_mint]` |
-| Share Mint | `["shares", vault_state]` |
-| Reserve ATA | ATA of `(vault_state, token_mint)` |
-| Strategy | `["strategy", vault_state, strategy_id (u64 LE)]` |
+| Account                | Seeds                                                   |
+| ---------------------- | ------------------------------------------------------- |
+| Vault State            | `["vault", token_mint, vault_id (u64 LE)]`              |
+| Share Mint             | `["shares", vault_state]`                               |
+| Reserve ATA            | ATA of `(vault_state, token_mint)`                      |
+| Strategy               | `["strategy", vault_state, strategy_id (u64 LE)]`       |
 | Strategy Token Account | `["strategy_token", vault_state, strategy_id (u64 LE)]` |
 
 ---
@@ -183,14 +184,14 @@ sol-vault/
 
 ## Tech Stack
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| Program | Rust + Anchor | 0.32.1 |
-| Rust toolchain | stable | 1.89.0 |
-| Tests | TypeScript + ts-mocha + Chai | - |
-| Frontend | Next.js + React + Tailwind | 16 / 19 / 4 |
-| Package manager | Bun | - |
-| AI Agent | Solana Agent Kit + Anthropic Claude | 2.0 |
+| Component       | Technology                          | Version     |
+| --------------- | ----------------------------------- | ----------- |
+| Program         | Rust + Anchor                       | 0.32.1      |
+| Rust toolchain  | stable                              | 1.89.0      |
+| Tests           | TypeScript + ts-mocha + Chai        | -           |
+| Frontend        | Next.js + React + Tailwind          | 16 / 19 / 4 |
+| Package manager | Bun                                 | -           |
+| AI Agent        | Solana Agent Kit + Anthropic Claude | 2.0         |
 
 ---
 
@@ -239,13 +240,13 @@ bun run start
 
 ## Deployment Info
 
-| Param | Value |
-|-------|-------|
-| Program ID (devnet) | `4VgPkuQSgqvaBaE7X5ZyUFeMPRMj7yAa8cgsi22ZTvik` |
-| Upgrade Authority | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn` |
-| Anchor | 0.32.1 |
-| Cluster | devnet (mainnet not yet deployed) |
-| Explorer | [View on Solana Explorer](https://explorer.solana.com/address/4VgPkuQSgqvaBaE7X5ZyUFeMPRMj7yAa8cgsi22ZTvik?cluster=devnet) |
+| Param               | Value                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Program ID (devnet) | `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B`                                                                             |
+| Upgrade Authority   | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn`                                                                             |
+| Anchor              | 0.32.1                                                                                                                     |
+| Cluster             | devnet (mainnet not yet deployed)                                                                                          |
+| Explorer            | [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet) |
 
 ---
 
@@ -254,6 +255,7 @@ bun run start
 The vault's delegate pattern enables autonomous AI agents to manage strategy funds. An agent's wallet keypair is set as the delegate on a strategy — it receives SPL token spending authority and can autonomously lend funds via Lulo (Solana's lending aggregator routing to Kamino, Drift, MarginFi).
 
 **Flow:**
+
 1. Admin calls `create_strategy(agent_pubkey)` — agent becomes delegate
 2. Authority calls `allocate_to_strategy(amount)` — tokens move to strategy account
 3. Agent detects balance, transfers to own ATA (using delegate authority), lends via Lulo
@@ -267,16 +269,16 @@ See [AI_PLAN.md](AI_PLAN.md) for full implementation details.
 
 ## Error Codes
 
-| Error | When |
-|-------|------|
-| `InsufficientBalance` | Source token account doesn't have enough |
-| `InsufficientReserve` | Reserve can't cover withdrawal (funds in strategies) |
-| `StrategyInactive` | Trying to use a deactivated strategy |
-| `UnauthorizedAdmin` | Signer is not the vault admin |
-| `UnauthorizedAuthority` | Signer is not the vault authority |
-| `InvalidMint` | Token mint mismatch |
-| `ZeroAmount` | Deposit/withdraw amount must be > 0 |
-| `WeightExceedsMax` | Strategy weight exceeds 10000 basis points (100%) |
+| Error                             | When                                                             |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `InsufficientBalance`             | Source token account doesn't have enough                         |
+| `InsufficientReserve`             | Reserve can't cover withdrawal (funds in strategies)             |
+| `StrategyInactive`                | Trying to use a deactivated strategy                             |
+| `UnauthorizedAdmin`               | Signer is not the vault admin                                    |
+| `UnauthorizedAuthority`           | Signer is not the vault authority                                |
+| `InvalidMint`                     | Token mint mismatch                                              |
+| `ZeroAmount`                      | Deposit/withdraw amount must be > 0                              |
+| `WeightExceedsMax`                | Strategy weight exceeds 10000 basis points (100%)                |
 | `InsufficientReserveForRebalance` | Reserve doesn't have enough tokens to cover rebalance allocation |
 
 ---
@@ -288,3 +290,37 @@ See [AI_PLAN.md](AI_PLAN.md) for full implementation details.
 - **Delegate pattern** — strategies get spending permission but can't modify vault state, mint shares, or access other strategies
 - **Deactivation is permanent** — once a strategy is deactivated, it can never be reactivated (prevents delegate abuse)
 - **Anchor constraints** — all account validation happens before instruction execution via `#[derive(Accounts)]` structs
+
+Page 1:
+I would like to present you Erebor. The vault infrastructure for funds management with AI agents on Solana. Let me show you why this matters.
+
+Page 2:
+AI agents are fragmented - each runs on separate platform with own different rules
+Hard to review and trust - users need to independently review each agent and decide to give them their funds or not
+AI agents today run on different platforms — ElizaOS, Alamanak, Cod3x, custom bots — each in its own wallet, it’s difficult to track all of them if you want to build a real portfolio of AI agents
+
+Erebor solves this. You get a pre-reviewed pack of trusted agents — a curator already did the research, testing, and approval. Your deposit is automatically diversified across multiple agents with admin-set weights. Yield compounds automatically, and rebalancing keeps allocations on targets.
+
+Page 3:
+The AI agents sector went from practically nothing to $39 billion peak market cap in 18 months.
+
+On the right — key protocols like Almanak, Cod3x — perp trading agents, I have strong connections with them and see partnership potential. ElizaOS has 50,000+ deployed agents.
+
+Bottom line: 77% of all agent transaction volume happens on Solana. These agents are managing real money and they need a safe, structured home for that capital.
+
+Page 4:
+From the user's perspective,. Choose a vault with a manager you trust. Deposit USDC in one transaction. Receive tokenized SPL share tokens representing your percentage of the vault, you can use them as collateral in other lending protocols. Withdraw anytime by burning shares — you get your proportional assets including all yield earned by all agents in the vault.
+
+Page 5:
+The admin acts like a fund manager — they do the research so thousands of depositors don't have to. Same model as Morpho's curators or Kamino's risk managers.
+
+The vault can't prevent bad trades. But it limits the damage — if one agent loses everything, only its allocation percentage is affected.
+
+Page 6:
+From the agent's owner perspective, it only sees it’s assigned strategy token account.
+Agent’s owner must provide to the admin list of information, so no black-box agents allowed.
+
+Page 7:
+Architecture overview. Users deposit/withdraw through the Vault State PDA. Below it: Share Mint issues receipt tokens, Reserve ATA holds deposits, Strategies container holds one token account per agent.
+
+Solana constraint: each SPL token account can only have one delegate — so each agents need separate accounts. Each strategy stores target_weight_bps; rebalance_strategy automatically distributes funds. Unallocated percentage stays in the reserve as a withdrawal buffer.

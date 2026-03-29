@@ -130,7 +130,7 @@ export function useAuthorityActions() {
         const sig = await program.methods
           .rebalanceStrategy()
           .accountsStrict({
-            authority: wallet.publicKey,
+            payer: wallet.publicKey,
             vaultState: vaultPda,
             strategy: strategyPda,
             tokenMint,
@@ -177,7 +177,7 @@ export function useAuthorityActions() {
           const sig = await program.methods
             .rebalanceStrategy()
             .accountsStrict({
-              authority: wallet.publicKey,
+              payer: wallet.publicKey,
               vaultState: vaultPda,
               strategy: strategyPda,
               tokenMint,

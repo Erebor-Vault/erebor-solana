@@ -23,6 +23,7 @@ import BN from "bn.js";
 // Config — edit these
 // -------------------------------------------------------------------
 const TOKEN_MINT = new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY");
+const VAULT_ID = 4;
 const TARGET_WALLET = new PublicKey("8qKtKHeN8hMRLGPXQgBF84CkwC8UPjks4CLuCtLNF2qv");
 const RPC_URL = "https://api.devnet.solana.com";
 const WALLET_PATH = "./id.json";
@@ -58,7 +59,7 @@ async function main() {
 
   // Derive PDAs
   const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)], program.programId
+    [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(VAULT_ID).toArrayLike(Buffer, "le", 8)], program.programId
   );
   const [shareMintPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("shares"), vaultPda.toBuffer()], program.programId
@@ -87,7 +88,7 @@ async function main() {
 
   // Initialize vault
   console.log("Initializing vault...");
-  await program.methods.initializeVault(new BN(0)).accountsStrict({
+  await program.methods.initializeVault(new BN(VAULT_ID)).accountsStrict({
     admin: payer.publicKey,
     vaultState: vaultPda,
     tokenMint: TOKEN_MINT,

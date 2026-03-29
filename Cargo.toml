@@ -4,6 +4,11 @@ members = [
 ]
 resolver = "2"
 
+# Pin crates that publish edition2024 versions incompatible with cargo-build-sbf (Cargo 1.75)
+[workspace.dependencies]
+constant_time_eq = "=0.3.1"
+toml_datetime = "=0.6.11"
+
 [profile.release]
 overflow-checks = true
 lto = "fat"

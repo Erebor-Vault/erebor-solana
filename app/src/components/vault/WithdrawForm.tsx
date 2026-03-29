@@ -5,6 +5,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWithdraw } from "@/hooks/useWithdraw";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { useVault } from "@/components/providers/VaultProvider";
+import { useStrategies } from "@/hooks/useStrategies";
+import { useAuthorityActions } from "@/hooks/useAuthorityActions";
 import { AmountInput } from "@/components/shared/AmountInput";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { parseTokenInput, formatTokenAmount } from "@/lib/format";
@@ -12,9 +14,12 @@ import { parseTokenInput, formatTokenAmount } from "@/lib/format";
 export function WithdrawForm() {
   const { connected } = useWallet();
   const { withdraw, loading } = useWithdraw();
-  const { sharePrice, reserveBalance } = useVault();
+  const { sharePrice, reserveBalance, vault } = useVault();
   const { shareBalance, refresh: refreshPosition } = useUserPosition();
+  const { strategies } = useStrategies();
+  const { rebalanceAll } = useAuthorityActions();
   const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState("");
 
   const parsedShares = parseTokenInput(amount);
   const estimatedTokens = parsedShares
@@ -27,11 +32,35 @@ export function WithdrawForm() {
   const handleWithdraw = async () => {
     if (!parsedShares) return;
     try {
+      setStatus("Withdrawing...");
       const sig = await withdraw(parsedShares);
       showTxSuccess(sig);
       setAmount("");
+
+      // Auto-rebalance all active strategies after withdrawal
+      if (vault) {
+        const activeStrategies = strategies.filter(
+          (s) => s.isActive && s.targetWeightBps > 0
+        );
+        if (activeStrategies.length > 0) {
+          setStatus("Rebalancing strategies...");
+          const sigs = await rebalanceAll(
+            activeStrategies.map((s) => ({
+              strategyId: s.strategyId.toNumber(),
+              tokenAccount: s.tokenAccount,
+              allocatedAmount: s.allocatedAmount,
+              targetWeightBps: s.targetWeightBps,
+            })),
+            vault.totalDeposited.toNumber() - estimatedTokens
+          );
+          if (sigs.length > 0) showTxSuccess(sigs[sigs.length - 1]);
+        }
+      }
+
+      setStatus("");
       await refreshPosition();
     } catch (err) {
+      setStatus("");
       showTxError(err);
     }
   };
@@ -67,7 +96,7 @@ export function WithdrawForm() {
         }
         className="w-full rounded-lg bg-[var(--color-accent-secondary)] py-3 font-semibold text-white transition-colors hover:bg-[#8035ee] disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {loading ? "Withdrawing..." : connected ? "Withdraw" : "Connect Wallet"}
+        {status || (loading ? "Withdrawing..." : connected ? "Withdraw" : "Connect Wallet")}
       </button>
     </div>
   );

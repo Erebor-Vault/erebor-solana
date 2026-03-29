@@ -89,12 +89,13 @@ export function VaultList() {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-8">
       {summaries.map((s) => {
         const isActive =
-          s.entry.tokenMint.toBase58() === activeEntry.tokenMint.toBase58();
+          s.entry.tokenMint.toBase58() === activeEntry.tokenMint.toBase58() &&
+          s.entry.vaultId === activeEntry.vaultId;
 
         return (
           <button
-            key={s.entry.tokenMint.toBase58()}
-            onClick={() => selectVault(s.entry.tokenMint)}
+            key={`${s.entry.tokenMint.toBase58()}:${s.entry.vaultId}`}
+            onClick={() => selectVault(s.entry.tokenMint, s.entry.vaultId)}
             className={`rounded-xl border p-5 text-left transition-all ${
               isActive
                 ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]"

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import BN from "bn.js";
 import { truncateAddress, formatTokenAmount } from "@/lib/format";
 import { useVault } from "@/components/providers/VaultProvider";
 import { useAuthorityActions } from "@/hooks/useAuthorityActions";
@@ -21,6 +20,14 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
   const [weightInput, setWeightInput] = useState("");
   const [showActions, setShowActions] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+
+  const [copied, setCopied] = useState<string | null>(null);
+
+  function copyAddress(label: string, address: string) {
+    navigator.clipboard.writeText(address);
+    setCopied(label);
+    setTimeout(() => setCopied(null), 1500);
+  }
 
   const totalDeposited = vault?.totalDeposited.toNumber() || 0;
   const allocationPct =
@@ -86,7 +93,25 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div>
           <span className="text-[var(--color-text-muted)]">Delegate</span>
-          <p className="font-mono">{truncateAddress(strategy.delegate.toBase58())}</p>
+          <button
+            onClick={() => copyAddress("delegate", strategy.delegate.toBase58())}
+            className="flex items-center gap-1 font-mono hover:text-[var(--color-accent)] transition-colors"
+            title={strategy.delegate.toBase58()}
+          >
+            {truncateAddress(strategy.delegate.toBase58())}
+            <span className="text-xs">{copied === "delegate" ? "Copied!" : "copy"}</span>
+          </button>
+        </div>
+        <div>
+          <span className="text-[var(--color-text-muted)]">Token Account</span>
+          <button
+            onClick={() => copyAddress("token", strategy.tokenAccount.toBase58())}
+            className="flex items-center gap-1 font-mono hover:text-[var(--color-accent)] transition-colors"
+            title={strategy.tokenAccount.toBase58()}
+          >
+            {truncateAddress(strategy.tokenAccount.toBase58())}
+            <span className="text-xs">{copied === "token" ? "Copied!" : "copy"}</span>
+          </button>
         </div>
         <div>
           <span className="text-[var(--color-text-muted)]">Allocated</span>

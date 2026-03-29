@@ -20,7 +20,7 @@ use anchor_spl::associated_token::AssociatedToken;
 
 // Unique on-chain address of this program (like a contract address in Solidity).
 // Anchor verifies at runtime that the executing program matches this ID.
-declare_id!("4VgPkuQSgqvaBaE7X5ZyUFeMPRMj7yAa8cgsi22ZTvik");
+declare_id!("DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B");
 
 #[program]
 pub mod my_project {
@@ -463,7 +463,7 @@ pub mod my_project {
 
     // Rebalance a single strategy to match its target weight.
     // Calculates: target = total_deposited * target_weight_bps / 10000
-    // Then allocates or deallocates the difference. Authority signs.
+    // Then allocates or deallocates the difference. Permissionless — anyone can call.
     // Backend should process deallocations before allocations to ensure reserve has funds.
     pub fn rebalance_strategy(ctx: Context<RebalanceStrategy>) -> Result<()> {
         // Read all needed values upfront to avoid borrow conflicts
@@ -1051,16 +1051,15 @@ pub struct SetStrategyWeight<'info> {
     pub strategy: Account<'info, StrategyAllocation>,
 }
 
-// Accounts for `rebalance_strategy` — authority rebalances a strategy to its target weight.
-// Same accounts as AllocateToStrategy since rebalance may move funds in either direction.
+// Accounts for `rebalance_strategy` — anyone can trigger rebalancing to target weights.
+// The vault PDA signs all CPI transfers, so no authority check is needed.
 #[derive(Accounts)]
 pub struct RebalanceStrategy<'info> {
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         seeds = [b"vault", vault_state.token_mint.as_ref(), &vault_state.vault_id.to_le_bytes()],
         bump = vault_state.bump,
-        constraint = vault_state.authority == authority.key() @ VaultError::UnauthorizedAuthority,
     )]
     pub vault_state: Account<'info, VaultState>,
 

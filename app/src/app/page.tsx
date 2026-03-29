@@ -6,6 +6,7 @@ import { VaultStats } from "@/components/vault/VaultStats";
 import { UserPosition } from "@/components/vault/UserPosition";
 import { DepositForm } from "@/components/vault/DepositForm";
 import { WithdrawForm } from "@/components/vault/WithdrawForm";
+import { AllocationChart } from "@/components/admin/AllocationChart";
 import { useVault } from "@/components/providers/VaultProvider";
 
 export default function DashboardPage() {
@@ -61,6 +62,8 @@ export default function DashboardPage() {
 
         <UserPosition />
       </div>
+
+      <AllocationChart />
     </div>
   );
 }

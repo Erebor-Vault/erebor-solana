@@ -5,6 +5,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useDeposit } from "@/hooks/useDeposit";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { useVault } from "@/components/providers/VaultProvider";
+import { useStrategies } from "@/hooks/useStrategies";
+import { useAuthorityActions } from "@/hooks/useAuthorityActions";
 import { AmountInput } from "@/components/shared/AmountInput";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { parseTokenInput, formatTokenAmount } from "@/lib/format";
@@ -12,9 +14,12 @@ import { parseTokenInput, formatTokenAmount } from "@/lib/format";
 export function DepositForm() {
   const { connected } = useWallet();
   const { deposit, loading } = useDeposit();
-  const { sharePrice } = useVault();
+  const { sharePrice, vault } = useVault();
   const { tokenBalance, refresh: refreshPosition } = useUserPosition();
+  const { strategies } = useStrategies();
+  const { rebalanceAll } = useAuthorityActions();
   const [amount, setAmount] = useState("");
+  const [status, setStatus] = useState("");
 
   const parsedAmount = parseTokenInput(amount);
   const estimatedShares = parsedAmount
@@ -24,11 +29,35 @@ export function DepositForm() {
   const handleDeposit = async () => {
     if (!parsedAmount) return;
     try {
+      setStatus("Depositing...");
       const sig = await deposit(parsedAmount);
       showTxSuccess(sig);
       setAmount("");
+
+      // Auto-rebalance all active strategies after deposit
+      if (vault) {
+        const activeStrategies = strategies.filter(
+          (s) => s.isActive && s.targetWeightBps > 0
+        );
+        if (activeStrategies.length > 0) {
+          setStatus("Rebalancing strategies...");
+          const sigs = await rebalanceAll(
+            activeStrategies.map((s) => ({
+              strategyId: s.strategyId.toNumber(),
+              tokenAccount: s.tokenAccount,
+              allocatedAmount: s.allocatedAmount,
+              targetWeightBps: s.targetWeightBps,
+            })),
+            vault.totalDeposited.toNumber() + parsedAmount.toNumber()
+          );
+          if (sigs.length > 0) showTxSuccess(sigs[sigs.length - 1]);
+        }
+      }
+
+      setStatus("");
       await refreshPosition();
     } catch (err) {
+      setStatus("");
       showTxError(err);
     }
   };
@@ -56,7 +85,7 @@ export function DepositForm() {
         disabled={!connected || !parsedAmount || loading}
         className="w-full rounded-lg bg-[var(--color-accent)] py-3 font-semibold text-black transition-colors hover:bg-[#12d985] disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {loading ? "Depositing..." : connected ? "Deposit" : "Connect Wallet"}
+        {status || (loading ? "Depositing..." : connected ? "Deposit" : "Connect Wallet")}
       </button>
     </div>
   );

@@ -23,7 +23,7 @@ export function Navbar() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-8">
           <Link href="/" className="text-xl font-bold text-[var(--color-accent)]">
-            Sol Vault
+            Erebor
           </Link>
           <div className="flex gap-1">
             <Link

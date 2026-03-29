@@ -30,7 +30,7 @@ interface VaultContextValue {
   // Registry
   vaultEntries: VaultEntry[];
   activeEntry: VaultEntry;
-  selectVault: (tokenMint: PublicKey) => void;
+  selectVault: (tokenMint: PublicKey, vaultId: number) => void;
   // PDAs
   tokenMint: PublicKey;
   vaultPda: PublicKey;
@@ -54,27 +54,27 @@ export function useVault() {
   return ctx;
 }
 
-const STORAGE_KEY = "sol-vault-selected-mint";
+const STORAGE_KEY = "sol-vault-selected";
 
-function getInitialEntry(): VaultEntry {
-  if (typeof window !== "undefined") {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const found = VAULT_REGISTRY.find(
-          (v) => v.tokenMint.toBase58() === saved
-        );
-        if (found) return found;
-      }
-    } catch {}
-  }
-  return VAULT_REGISTRY[0];
+function vaultKey(entry: VaultEntry): string {
+  return `${entry.tokenMint.toBase58()}:${entry.vaultId}`;
 }
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const { connection } = useConnection();
   const program = useVaultProgram();
-  const [activeEntry, setActiveEntry] = useState<VaultEntry>(getInitialEntry);
+  const [activeEntry, setActiveEntry] = useState<VaultEntry>(VAULT_REGISTRY[0]);
+
+  // Restore saved vault selection after hydration
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const found = VAULT_REGISTRY.find((v) => vaultKey(v) === saved);
+        if (found) setActiveEntry(found);
+      }
+    } catch {}
+  }, []);
 
   const tokenMint = activeEntry.tokenMint;
   const vaultPda = useMemo(() => deriveVaultPda(tokenMint, activeEntry.vaultId), [tokenMint, activeEntry.vaultId]);
@@ -90,9 +90,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const selectVault = useCallback((mint: PublicKey) => {
+  const selectVault = useCallback((mint: PublicKey, id: number) => {
     const entry = VAULT_REGISTRY.find(
-      (v) => v.tokenMint.toBase58() === mint.toBase58()
+      (v) => v.tokenMint.toBase58() === mint.toBase58() && v.vaultId === id
     );
     if (entry) {
       setActiveEntry(entry);
@@ -100,7 +100,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       setError(null);
       try {
-        localStorage.setItem(STORAGE_KEY, mint.toBase58());
+        localStorage.setItem(STORAGE_KEY, vaultKey(entry));
       } catch {}
     }
   }, []);
@@ -140,7 +140,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 15000);
+    const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
   }, [refresh]);
 

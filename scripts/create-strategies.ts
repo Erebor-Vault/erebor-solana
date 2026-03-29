@@ -24,17 +24,19 @@ import * as fs from "fs";
 // -------------------------------------------------------------------
 const RPC_URL = "https://api.devnet.solana.com";
 const WALLET_PATH = "./id.json";
-const TOKEN_MINT = new PublicKey("2RS6ChP1ALZK3hKyr549dFJj8jNDK7SUP2eL2YTTAMRF");
+const TOKEN_MINT = new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY");
+const VAULT_ID = 0;
 
-// 5 mock AI agent strategies
+// 6 mock AI agent strategies — simulating autonomous DeFi agents
 const STRATEGIES = [
-  { name: "AI Lending Agent (Kamino)",   weightBps: 2500 }, // 25%
-  { name: "AI Yield Agent (Drift)",      weightBps: 2000 }, // 20%
-  { name: "AI LP Agent (Raydium)",       weightBps: 1500 }, // 15%
-  { name: "AI Staking Agent (MarginFi)", weightBps: 1000 }, // 10%
-  { name: "AI Arbitrage Agent (Jupiter)", weightBps: 500 },  // 5%
+  { name: "Cod3x DeFi Agent",           weightBps: 2500 }, // 25%
+  { name: "Almanack Yield Optimizer",    weightBps: 2000 }, // 20%
+  { name: "Giza ML Strategist",         weightBps: 1500 }, // 15%
+  { name: "Autonolas Service Agent",     weightBps: 1000 }, // 10%
+  { name: "Wayfinder Alpha Agent",       weightBps: 500 },  // 5%
+  { name: "Fetch.ai DeltaV Agent",       weightBps: 500 },  // 5%
 ];
-// Total: 75%, 25% stays in reserve
+// Total: 80%, 20% stays in reserve
 
 // -------------------------------------------------------------------
 // Helpers
@@ -60,7 +62,7 @@ async function main() {
 
   // Derive vault PDA
   const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+    [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(VAULT_ID).toArrayLike(Buffer, "le", 8)],
     program.programId
   );
 
