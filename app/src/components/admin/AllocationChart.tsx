@@ -8,8 +8,21 @@ import { formatTokenAmount } from "@/lib/format";
 const COLORS = ["#14f195", "#9945ff", "#f59e0b", "#ef4444", "#3b82f6", "#ec4899"];
 
 export function AllocationChart() {
-  const { reserveBalance, vault } = useVault();
-  const { strategies } = useStrategies();
+  const { reserveBalance, vault, loading: vaultLoading } = useVault();
+  const { strategies, loading: strategiesLoading } = useStrategies();
+
+  if (vaultLoading || strategiesLoading) {
+    return (
+      <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-6">
+        <h3 className="text-sm font-medium text-[var(--color-text-secondary)] mb-4">
+          Fund Allocation
+        </h3>
+        <div className="h-64 flex items-center justify-center">
+          <div className="animate-pulse text-[var(--color-text-secondary)]">Loading…</div>
+        </div>
+      </div>
+    );
+  }
 
   if (!vault || vault.totalDeposited.isZero()) {
     return (
