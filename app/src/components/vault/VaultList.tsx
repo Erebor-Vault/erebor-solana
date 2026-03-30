@@ -27,15 +27,13 @@ export function VaultList() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!program) return;
-
     async function fetchAll() {
       const results: VaultSummary[] = [];
 
       for (const entry of vaultEntries) {
         const vaultPda = deriveVaultPda(entry.tokenMint, entry.vaultId);
         try {
-          const vault = await (program!.account as any).vaultState.fetch(vaultPda);
+          const vault = await (program.account as any).vaultState.fetch(vaultPda);
           const reserveAta = deriveReserveAta(vaultPda, entry.tokenMint);
           let reserveBalance = new BN(0);
           try {

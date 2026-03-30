@@ -887,7 +887,7 @@ describe("my_project", () => {
         await program.methods
           .rebalanceStrategy()
           .accountsStrict({
-            authority: admin.publicKey,
+            payer: admin.publicKey,
             vaultState: vaultPda,
             strategy: s.pda,
             tokenMint: mint,
@@ -1425,7 +1425,7 @@ describe("my_project", () => {
         await program.methods
           .rebalanceStrategy()
           .accountsStrict({
-            authority: admin.publicKey,
+            payer: admin.publicKey,
             vaultState: vaultPda,
             strategy: s.pda,
             tokenMint: mint,
@@ -1807,7 +1807,7 @@ describe("my_project", () => {
       await program.methods
         .rebalanceStrategy()
         .accountsStrict({
-          authority: admin.publicKey,
+          payer: admin.publicKey,
           vaultState: vaultPda,
           strategy: strategyPda,
           tokenMint: mint,
@@ -2130,7 +2130,7 @@ describe("my_project", () => {
         await program.methods
           .rebalanceStrategy()
           .accountsStrict({
-            authority: admin.publicKey,
+            payer: admin.publicKey,
             vaultState: vaultPda,
             strategy: s.pda,
             tokenMint: mint,
@@ -2283,26 +2283,22 @@ describe("my_project", () => {
       }
     });
 
-    it("rebalance_strategy — non-authority rejected", async () => {
-      try {
-        await program.methods
-          .rebalanceStrategy()
-          .accountsStrict({
-            authority: user1.publicKey,
-            vaultState: vaultPda,
-            strategy: activeStrategies[0].pda,
-            tokenMint: mint,
-            reserveAta: reserveAta,
-            strategyTokenAccount: activeStrategies[0].tokenAccount,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([user1])
-          .rpc();
-        assert.fail("Should have thrown UnauthorizedAuthority");
-      } catch (err: any) {
-        assert.ok(err.toString().includes("Unauthorized"), "should be UnauthorizedAuthority error");
-        console.log("Non-authority rebalance correctly rejected");
-      }
+    it("rebalance_strategy — any signer can trigger", async () => {
+      // rebalance_strategy has no authority check — anyone can trigger it
+      await program.methods
+        .rebalanceStrategy()
+        .accountsStrict({
+          payer: user1.publicKey,
+          vaultState: vaultPda,
+          strategy: activeStrategies[0].pda,
+          tokenMint: mint,
+          reserveAta: reserveAta,
+          strategyTokenAccount: activeStrategies[0].tokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([user1])
+        .rpc();
+      console.log("Non-admin signer successfully triggered rebalance");
     });
 
     // ---- E2E: every action triggers rebalance ----
@@ -2580,7 +2576,7 @@ describe("my_project", () => {
         await program.methods
           .rebalanceStrategy()
           .accountsStrict({
-            authority: admin.publicKey,
+            payer: admin.publicKey,
             vaultState: vaultPda,
             strategy: activeStrategies[2].pda,
             tokenMint: mint,

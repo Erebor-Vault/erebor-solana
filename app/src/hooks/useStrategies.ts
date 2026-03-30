@@ -27,9 +27,13 @@ export function useStrategies() {
   const [strategies, setStrategies] = useState<StrategyData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
-    if (!program) return;
+  // Clear stale strategies when vault changes
+  useEffect(() => {
+    setStrategies([]);
+    setLoading(true);
+  }, [vaultPda]);
 
+  const refresh = useCallback(async () => {
     try {
       // Fetch all strategy accounts that belong to this vault
       const accounts = await (program.account as any).strategyAllocation.all([

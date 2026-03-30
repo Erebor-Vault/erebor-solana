@@ -94,19 +94,23 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const entry = VAULT_REGISTRY.find(
       (v) => v.tokenMint.toBase58() === mint.toBase58() && v.vaultId === id
     );
-    if (entry) {
-      setActiveEntry(entry);
-      setVault(null);
-      setLoading(true);
-      setError(null);
-      try {
-        localStorage.setItem(STORAGE_KEY, vaultKey(entry));
-      } catch {}
-    }
-  }, []);
+    if (!entry) return;
+    // Skip if already selected
+    if (
+      entry.tokenMint.toBase58() === activeEntry.tokenMint.toBase58() &&
+      entry.vaultId === activeEntry.vaultId
+    ) return;
+
+    setActiveEntry(entry);
+    setVault(null);
+    setLoading(true);
+    setError(null);
+    try {
+      localStorage.setItem(STORAGE_KEY, vaultKey(entry));
+    } catch {}
+  }, [activeEntry]);
 
   const refresh = useCallback(async () => {
-    if (!program) return;
     try {
       const vaultAccount = await (program.account as any).vaultState.fetch(vaultPda);
       setVault(vaultAccount as unknown as VaultData);
