@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{self, Mint, Revoke, TokenAccount, TokenInterface};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::errors::VaultError;
 use crate::state::{StrategyAllocation, VaultState};
@@ -10,17 +10,7 @@ pub fn handler(ctx: Context<DeactivateStrategy>) -> Result<()> {
     let bump = ctx.accounts.vault_state.bump;
     let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
 
-    // Revoke delegate access
-    let revoke_accounts = Revoke {
-        source: ctx.accounts.strategy_token_account.to_account_info(),
-        authority: ctx.accounts.vault_state.to_account_info(),
-    };
-    let cpi_ctx = CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
-        revoke_accounts,
-        signer_seeds,
-    );
-    token_interface::revoke(cpi_ctx)?;
+    // No SPL revoke needed — there is no SPL delegate in the new model.
 
     // If there are remaining tokens, transfer them back to reserve
     let remaining = ctx.accounts.strategy_token_account.amount;

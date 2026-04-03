@@ -723,9 +723,7 @@ describe("my_project", () => {
           admin: admin.publicKey,
           vaultState: vaultPda,
           strategy: strategyPda,
-          strategyTokenAccount: strategyTokenAccount,
           newDelegate: protocolB.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .signers([admin])
         .rpc();
@@ -2018,9 +2016,7 @@ describe("my_project", () => {
             admin: admin.publicKey,
             vaultState: vaultPda,
             strategy: strategyPda,
-            strategyTokenAccount: strategyTokenAccount,
             newDelegate: Keypair.generate().publicKey,
-            tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([admin])
           .rpc();

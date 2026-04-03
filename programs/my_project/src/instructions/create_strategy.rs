@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{self, Approve, Mint, TokenAccount, TokenInterface};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::errors::VaultError;
 use crate::state::{StrategyAllocation, VaultState};
@@ -14,24 +14,10 @@ pub fn handler(ctx: Context<CreateStrategy>) -> Result<()> {
     strategy.is_active = true;
     strategy.target_weight_bps = 0;
     strategy.bump = ctx.bumps.strategy;
+    strategy.action_count = 0;
 
-    // CPI: Approve the delegate on the strategy token account.
-    let token_mint_key = ctx.accounts.vault_state.token_mint;
-    let vault_id_bytes = ctx.accounts.vault_state.vault_id.to_le_bytes();
-    let bump = ctx.accounts.vault_state.bump;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"vault", token_mint_key.as_ref(), &vault_id_bytes, &[bump]]];
-
-    let approve_accounts = Approve {
-        to: ctx.accounts.strategy_token_account.to_account_info(),
-        delegate: ctx.accounts.delegate.to_account_info(),
-        authority: ctx.accounts.vault_state.to_account_info(),
-    };
-    let cpi_ctx = CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
-        approve_accounts,
-        signer_seeds,
-    );
-    token_interface::approve(cpi_ctx, u64::MAX)?;
+    // No SPL approve — the delegate is now an action requester, not a token spender.
+    // The vault PDA remains sole authority on the strategy token account.
 
     ctx.accounts.vault_state.strategy_count += 1;
 
@@ -82,7 +68,7 @@ pub struct CreateStrategy<'info> {
     )]
     pub strategy_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    /// CHECK: The external protocol address to approve as delegate.
+    /// CHECK: The delegate address — now an action requester, not an SPL delegate.
     pub delegate: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
