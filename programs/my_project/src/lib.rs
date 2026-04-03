@@ -96,6 +96,10 @@ pub mod my_project {
         instructions::remove_allowed_action::handler(ctx)
     }
 
+    pub fn migrate_strategy(ctx: Context<MigrateStrategy>) -> Result<()> {
+        instructions::migrate_strategy::handler(ctx)
+    }
+
     pub fn execute_strategy_action<'info>(
         ctx: Context<'_, '_, 'info, 'info, ExecuteStrategyAction<'info>>,
         instruction_data: Vec<u8>,

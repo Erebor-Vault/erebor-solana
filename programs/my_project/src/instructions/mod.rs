@@ -19,6 +19,7 @@ pub mod set_authority;
 pub mod add_allowed_action;
 pub mod remove_allowed_action;
 pub mod execute_strategy_action;
+pub mod migrate_strategy;
 
 pub use initialize_vault::*;
 pub use deposit::*;
@@ -39,3 +40,4 @@ pub use set_authority::*;
 pub use add_allowed_action::*;
 pub use remove_allowed_action::*;
 pub use execute_strategy_action::*;
+pub use migrate_strategy::*;
