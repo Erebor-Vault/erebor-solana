@@ -2650,4 +2650,240 @@ describe("my_project", () => {
       console.log("Deposit 5M more + rebalance: 4M/8M/0M, reserve = 8M");
     });
   });
+
+  // ==========================================================================
+  // ACTION WHITELIST TESTS
+  // ==========================================================================
+  describe("Action Whitelist", () => {
+    let mint: anchor.web3.PublicKey;
+    let admin: Keypair;
+    let user1: Keypair;
+    let vaultPda: anchor.web3.PublicKey;
+    let strategyPda: anchor.web3.PublicKey;
+    let strategyTokenAccount: anchor.web3.PublicKey;
+    let allowedActionPda: anchor.web3.PublicKey;
+    const payer = (provider.wallet as anchor.Wallet).payer;
+    const vaultId = new BN(100); // unique vault ID for these tests
+    const fakeProgram = Keypair.generate();
+    const fakeDiscriminator = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    const delegate = Keypair.generate();
+
+    async function airdropAndConfirm(pubkey: anchor.web3.PublicKey, lamports: number) {
+      const sig = await connection.requestAirdrop(pubkey, lamports);
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      await connection.confirmTransaction({ blockhash, lastValidBlockHeight, signature: sig });
+    }
+
+    before(async () => {
+      admin = Keypair.generate();
+      user1 = Keypair.generate();
+      await airdropAndConfirm(admin.publicKey, 2e9);
+      await airdropAndConfirm(user1.publicKey, 2e9);
+
+      mint = await createMint(connection, payer, payer.publicKey, null, 6);
+
+      [vaultPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), mint.toBuffer(), vaultId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [shareMintPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("shares"), vaultPda.toBuffer()],
+        program.programId
+      );
+
+      const reserveAta = anchor.utils.token.associatedAddress({ mint, owner: vaultPda });
+
+      // Initialize vault
+      await program.methods
+        .initializeVault(vaultId)
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          reserveAta: reserveAta,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Create a strategy
+      [strategyPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+      [strategyTokenAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy_token"), vaultPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      await program.methods
+        .createStrategy()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          strategyTokenAccount: strategyTokenAccount,
+          delegate: delegate.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+    });
+
+    it("add_allowed_action — admin adds a whitelisted action", async () => {
+      [allowedActionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 2)],
+        program.programId
+      );
+
+      await program.methods
+        .addAllowedAction(fakeProgram.publicKey, Array.from(fakeDiscriminator))
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: allowedActionPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const action = await program.account.allowedAction.fetch(allowedActionPda);
+      assert.ok(action.strategy.equals(strategyPda), "strategy should match");
+      assert.ok(action.targetProgram.equals(fakeProgram.publicKey), "target_program should match");
+      assert.deepEqual(action.discriminator, Array.from(fakeDiscriminator), "discriminator should match");
+      assert.ok(action.actionId === 0, "action_id should be 0");
+      assert.ok(action.isActive === true, "should be active");
+
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.actionCount === 1, "action_count should be 1");
+
+      console.log("Allowed action 0 added successfully");
+    });
+
+    it("add_allowed_action — non-admin rejected", async () => {
+      const [actionPda1] = PublicKey.findProgramAddressSync(
+        [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(1).toArrayLike(Buffer, "le", 2)],
+        program.programId
+      );
+
+      try {
+        await program.methods
+          .addAllowedAction(fakeProgram.publicKey, Array.from(fakeDiscriminator))
+          .accountsStrict({
+            admin: user1.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: actionPda1,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([user1])
+          .rpc();
+        assert.fail("Should have thrown UnauthorizedAdmin");
+      } catch (e) {
+        assert.ok(e.toString().includes("Unauthorized"), "Should be unauthorized error");
+        console.log("Non-admin add_allowed_action correctly rejected");
+      }
+    });
+
+    it("add_allowed_action — second action for same strategy", async () => {
+      const secondDiscriminator = Buffer.from([9, 10, 11, 12, 13, 14, 15, 16]);
+      const secondProgram = Keypair.generate();
+
+      const [actionPda1] = PublicKey.findProgramAddressSync(
+        [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(1).toArrayLike(Buffer, "le", 2)],
+        program.programId
+      );
+
+      await program.methods
+        .addAllowedAction(secondProgram.publicKey, Array.from(secondDiscriminator))
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: actionPda1,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const action = await program.account.allowedAction.fetch(actionPda1);
+      assert.ok(action.actionId === 1, "action_id should be 1");
+      assert.ok(action.isActive === true, "should be active");
+
+      const strategy = await program.account.strategyAllocation.fetch(strategyPda);
+      assert.ok(strategy.actionCount === 2, "action_count should be 2");
+
+      console.log("Second allowed action added, action_count = 2");
+    });
+
+    it("remove_allowed_action — admin deactivates action", async () => {
+      await program.methods
+        .removeAllowedAction()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: allowedActionPda,
+        })
+        .signers([admin])
+        .rpc();
+
+      const action = await program.account.allowedAction.fetch(allowedActionPda);
+      assert.ok(action.isActive === false, "should be deactivated");
+
+      console.log("Allowed action 0 deactivated");
+    });
+
+    it("remove_allowed_action — already inactive rejected", async () => {
+      try {
+        await program.methods
+          .removeAllowedAction()
+          .accountsStrict({
+            admin: admin.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: allowedActionPda,
+          })
+          .signers([admin])
+          .rpc();
+        assert.fail("Should have thrown ActionNotActive");
+      } catch (e) {
+        assert.ok(e.toString().includes("Action is not active") || e.toString().includes("ActionNotActive"),
+          "Should be action not active error");
+        console.log("Deactivating already-inactive action correctly rejected");
+      }
+    });
+
+    it("remove_allowed_action — non-admin rejected", async () => {
+      // Use action 1 which is still active
+      const [actionPda1] = PublicKey.findProgramAddressSync(
+        [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(1).toArrayLike(Buffer, "le", 2)],
+        program.programId
+      );
+
+      try {
+        await program.methods
+          .removeAllowedAction()
+          .accountsStrict({
+            admin: user1.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: actionPda1,
+          })
+          .signers([user1])
+          .rpc();
+        assert.fail("Should have thrown UnauthorizedAdmin");
+      } catch (e) {
+        assert.ok(e.toString().includes("Unauthorized"), "Should be unauthorized error");
+        console.log("Non-admin remove_allowed_action correctly rejected");
+      }
+    });
+  });
 });

@@ -79,4 +79,20 @@ pub mod my_project {
     pub fn rebalance_strategy(ctx: Context<RebalanceStrategy>) -> Result<()> {
         instructions::rebalance_strategy::handler(ctx)
     }
+
+    // ============================================================
+    // ACTION WHITELIST INSTRUCTIONS
+    // ============================================================
+
+    pub fn add_allowed_action(
+        ctx: Context<AddAllowedAction>,
+        target_program: Pubkey,
+        discriminator: [u8; 8],
+    ) -> Result<()> {
+        instructions::add_allowed_action::handler(ctx, target_program, discriminator)
+    }
+
+    pub fn remove_allowed_action(ctx: Context<RemoveAllowedAction>) -> Result<()> {
+        instructions::remove_allowed_action::handler(ctx)
+    }
 }

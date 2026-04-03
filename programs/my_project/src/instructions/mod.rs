@@ -16,6 +16,9 @@ pub mod rebalance_strategy;
 pub mod transfer_admin;
 pub mod set_authority;
 
+pub mod add_allowed_action;
+pub mod remove_allowed_action;
+
 pub use initialize_vault::*;
 pub use deposit::*;
 pub use withdraw::*;
@@ -31,3 +34,6 @@ pub use rebalance_strategy::*;
 
 pub use transfer_admin::*;
 pub use set_authority::*;
+
+pub use add_allowed_action::*;
+pub use remove_allowed_action::*;
