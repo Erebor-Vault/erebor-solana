@@ -65,4 +65,34 @@ pub struct StrategyAllocation {
 
     /// PDA bump.
     pub bump: u8, // 1 byte
+
+    /// Count of AllowedAction PDAs for this strategy.
+    pub action_count: u16, // 2 bytes
+}
+
+/// AllowedAction — a whitelisted (program, instruction) pair for a strategy.
+///
+/// Seeds: ["allowed_action", strategy.key(), &action_id.to_le_bytes()]
+/// Each strategy has its own independent whitelist of allowed actions.
+/// The delegate (or authority) can only execute CPI calls that match an active AllowedAction.
+#[account]
+#[derive(InitSpace)]
+pub struct AllowedAction {
+    /// Back-reference to the StrategyAllocation this action belongs to.
+    pub strategy: Pubkey, // 32 bytes
+
+    /// The external program to CPI into (e.g. Lulo, Kamino, Drift).
+    pub target_program: Pubkey, // 32 bytes
+
+    /// Anchor instruction discriminator (first 8 bytes of instruction data).
+    pub discriminator: [u8; 8], // 8 bytes
+
+    /// Sequential ID within the strategy.
+    pub action_id: u16, // 2 bytes
+
+    /// Whether this action is active. Can be deactivated without closing.
+    pub is_active: bool, // 1 byte
+
+    /// PDA bump.
+    pub bump: u8, // 1 byte
 }

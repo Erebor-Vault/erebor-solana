@@ -28,4 +28,19 @@ pub enum VaultError {
 
     #[msg("Insufficient reserve for rebalance allocation")]
     InsufficientReserveForRebalance,
+
+    #[msg("Unauthorized: not delegate or authority")]
+    UnauthorizedCaller,
+
+    #[msg("Action is not in the allowed list for this strategy")]
+    ActionNotAllowed,
+
+    #[msg("Action is not active")]
+    ActionNotActive,
+
+    #[msg("Invalid strategy reference")]
+    InvalidStrategy,
+
+    #[msg("Instruction data too short or invalid")]
+    InvalidInstructionData,
 }
