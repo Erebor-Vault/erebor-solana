@@ -24,6 +24,27 @@ pub fn handler<'info>(
         VaultError::ActionNotAllowed
     );
 
+    // Validate: no writable token account in remaining_accounts may have
+    // the caller as its authority. This prevents delegates from routing
+    // vault funds to their own wallets via crafted CPI destinations.
+    let caller_key = ctx.accounts.caller.key();
+    let spl_token_program = anchor_spl::token::ID;
+
+    for acc in ctx.remaining_accounts.iter() {
+        if acc.is_writable && *acc.owner == spl_token_program {
+            let data = acc.try_borrow_data()?;
+            if data.len() >= 64 {
+                // SPL Token account layout: authority is at bytes 32..64
+                let authority = Pubkey::try_from(&data[32..64])
+                    .map_err(|_| error!(VaultError::InvalidInstructionData))?;
+                require!(
+                    authority != caller_key,
+                    VaultError::UnauthorizedDestination
+                );
+            }
+        }
+    }
+
     // Build account metas from remaining_accounts for the CPI
     let vault_key = ctx.accounts.vault_state.key();
     let cpi_accounts: Vec<AccountMeta> = ctx

@@ -3221,5 +3221,64 @@ describe("my_project", () => {
         console.log("Deactivated action correctly rejected");
       }
     });
+
+    it("execute_strategy_action — delegate's own token account as destination rejected", async () => {
+      // Re-add the allowed action (it was deactivated in the previous test)
+      const [newActionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(1).toArrayLike(Buffer, "le", 2)],
+        program.programId
+      );
+
+      await program.methods
+        .addAllowedAction(TOKEN_PROGRAM_ID, Array.from(splTransferDiscriminator))
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: newActionPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Create delegate's own token account — this is what a malicious delegate would use
+      const delegateAta = await createAssociatedTokenAccount(
+        connection,
+        payer,
+        mint,
+        delegateKp.publicKey
+      );
+
+      const instructionData = Buffer.alloc(9);
+      instructionData[0] = 3;
+      testTransferAmount.toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+      try {
+        await program.methods
+          .executeStrategyAction(Buffer.from(instructionData))
+          .accountsStrict({
+            caller: delegateKp.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: newActionPda,
+            targetProgram: TOKEN_PROGRAM_ID,
+          })
+          .remainingAccounts([
+            { pubkey: strategyTokenAccount, isSigner: false, isWritable: true },
+            { pubkey: delegateAta, isSigner: false, isWritable: true }, // delegate's own account!
+            { pubkey: vaultPda, isSigner: false, isWritable: false },
+          ])
+          .signers([delegateKp])
+          .rpc();
+        assert.fail("Should have thrown UnauthorizedDestination");
+      } catch (e) {
+        assert.ok(
+          e.toString().includes("Writable token account belongs to caller") ||
+          e.toString().includes("UnauthorizedDestination"),
+          "Should be unauthorized destination error"
+        );
+        console.log("Delegate's own token account as destination correctly rejected");
+      }
+    });
   });
 });

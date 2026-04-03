@@ -43,4 +43,7 @@ pub enum VaultError {
 
     #[msg("Instruction data too short or invalid")]
     InvalidInstructionData,
+
+    #[msg("Writable token account belongs to caller — funds must flow to vault-owned accounts")]
+    UnauthorizedDestination,
 }
