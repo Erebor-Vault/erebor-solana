@@ -95,4 +95,11 @@ pub mod my_project {
     pub fn remove_allowed_action(ctx: Context<RemoveAllowedAction>) -> Result<()> {
         instructions::remove_allowed_action::handler(ctx)
     }
+
+    pub fn execute_strategy_action<'info>(
+        ctx: Context<'_, '_, 'info, 'info, ExecuteStrategyAction<'info>>,
+        instruction_data: Vec<u8>,
+    ) -> Result<()> {
+        instructions::execute_strategy_action::handler(ctx, instruction_data)
+    }
 }

@@ -2882,4 +2882,344 @@ describe("my_project", () => {
       }
     });
   });
+
+  // ==========================================================================
+  // EXECUTE STRATEGY ACTION TESTS
+  // ==========================================================================
+  describe("Execute Strategy Action", () => {
+    let mint: anchor.web3.PublicKey;
+    let admin: Keypair;
+    let delegateKp: Keypair;
+    let unauthorizedUser: Keypair;
+    let vaultPda: anchor.web3.PublicKey;
+    let strategyPda: anchor.web3.PublicKey;
+    let strategyTokenAccount: anchor.web3.PublicKey;
+    let reserveAta: anchor.web3.PublicKey;
+    let allowedActionPda: anchor.web3.PublicKey;
+    let recipientAta: anchor.web3.PublicKey;
+    const payer = (provider.wallet as anchor.Wallet).payer;
+    const vaultId = new BN(200); // unique vault ID for these tests
+
+    // For testing CPI routing, we use SPL Token Transfer as the target program.
+    // SPL Token Transfer format: [3 (instruction index), amount (u64 LE)] = 9 bytes total.
+    // Since our discriminator check compares first 8 bytes, and SPL Token embeds the amount
+    // in those bytes, we use a fixed test amount and set the discriminator to match.
+    // In production, Anchor programs have clean 8-byte discriminators independent of args.
+    const testTransferAmount = new BN(1_000_000);
+    const splTransferDiscriminator = Buffer.alloc(8);
+    splTransferDiscriminator[0] = 3; // SPL Token Transfer instruction index
+    testTransferAmount.toArrayLike(Buffer, "le", 8).copy(splTransferDiscriminator, 1, 0, 7);
+
+    async function airdropAndConfirm(pubkey: anchor.web3.PublicKey, lamports: number) {
+      const sig = await connection.requestAirdrop(pubkey, lamports);
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      await connection.confirmTransaction({ blockhash, lastValidBlockHeight, signature: sig });
+    }
+
+    before(async () => {
+      admin = Keypair.generate();
+      delegateKp = Keypair.generate();
+      unauthorizedUser = Keypair.generate();
+      await airdropAndConfirm(admin.publicKey, 2e9);
+      await airdropAndConfirm(delegateKp.publicKey, 2e9);
+      await airdropAndConfirm(unauthorizedUser.publicKey, 2e9);
+
+      mint = await createMint(connection, payer, payer.publicKey, null, 6);
+
+      [vaultPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("vault"), mint.toBuffer(), vaultId.toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      const [shareMintPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("shares"), vaultPda.toBuffer()],
+        program.programId
+      );
+
+      reserveAta = anchor.utils.token.associatedAddress({ mint, owner: vaultPda });
+
+      // Initialize vault
+      await program.methods
+        .initializeVault(vaultId)
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          reserveAta: reserveAta,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Create strategy with delegate
+      [strategyPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+      [strategyTokenAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy_token"), vaultPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
+        program.programId
+      );
+
+      await program.methods
+        .createStrategy()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          strategyTokenAccount: strategyTokenAccount,
+          delegate: delegateKp.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Deposit tokens and allocate to strategy
+      const adminTokenAccount = await createAssociatedTokenAccount(connection, payer, mint, admin.publicKey);
+      await mintTo(connection, payer, mint, adminTokenAccount, payer, 10_000_000);
+
+      const adminShareToken = anchor.utils.token.associatedAddress({
+        mint: shareMintPda,
+        owner: admin.publicKey,
+      });
+
+      await program.methods
+        .deposit(new BN(10_000_000))
+        .accountsStrict({
+          user: admin.publicKey,
+          vaultState: vaultPda,
+          tokenMint: mint,
+          shareMint: shareMintPda,
+          userTokenAccount: adminTokenAccount,
+          reserveAta: reserveAta,
+          userShareToken: adminShareToken,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      await program.methods
+        .allocateToStrategy(new BN(5_000_000))
+        .accountsStrict({
+          authority: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          tokenMint: mint,
+          reserveAta: reserveAta,
+          strategyTokenAccount: strategyTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Create a recipient token account for testing CPI transfers
+      recipientAta = await createAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
+
+      // Add allowed action: SPL Token Transfer
+      [allowedActionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 2)],
+        program.programId
+      );
+
+      await program.methods
+        .addAllowedAction(TOKEN_PROGRAM_ID, Array.from(splTransferDiscriminator))
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: allowedActionPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      console.log("Execute strategy action setup complete: vault, strategy, 5M allocated, SPL transfer whitelisted");
+    });
+
+    it("execute_strategy_action — delegate executes whitelisted SPL transfer", async () => {
+      // Build SPL Token Transfer instruction data: [3, amount_le_bytes] = 9 bytes
+      // Must use testTransferAmount so first 8 bytes match stored discriminator
+      const instructionData = Buffer.alloc(9);
+      instructionData[0] = 3;
+      testTransferAmount.toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+      const balanceBefore = await connection.getTokenAccountBalance(recipientAta);
+
+      await program.methods
+        .executeStrategyAction(Buffer.from(instructionData))
+        .accountsStrict({
+          caller: delegateKp.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: allowedActionPda,
+          targetProgram: TOKEN_PROGRAM_ID,
+        })
+        .remainingAccounts([
+          { pubkey: strategyTokenAccount, isSigner: false, isWritable: true },
+          { pubkey: recipientAta, isSigner: false, isWritable: true },
+          { pubkey: vaultPda, isSigner: false, isWritable: false },
+        ])
+        .signers([delegateKp])
+        .rpc();
+
+      const balanceAfter = await connection.getTokenAccountBalance(recipientAta);
+      assert.ok(
+        +balanceAfter.value.amount - +balanceBefore.value.amount === 1_000_000,
+        "Recipient should have received 1M tokens via CPI"
+      );
+
+      console.log("Delegate executed whitelisted SPL transfer via CPI: 1M tokens transferred");
+    });
+
+    it("execute_strategy_action — authority can also execute", async () => {
+      // Authority (admin is authority by default) can also call
+      // Uses same testTransferAmount to match discriminator
+      const balanceBefore = await connection.getTokenAccountBalance(recipientAta);
+
+      const instructionData = Buffer.alloc(9);
+      instructionData[0] = 3;
+      testTransferAmount.toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+      await program.methods
+        .executeStrategyAction(Buffer.from(instructionData))
+        .accountsStrict({
+          caller: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: allowedActionPda,
+          targetProgram: TOKEN_PROGRAM_ID,
+        })
+        .remainingAccounts([
+          { pubkey: strategyTokenAccount, isSigner: false, isWritable: true },
+          { pubkey: recipientAta, isSigner: false, isWritable: true },
+          { pubkey: vaultPda, isSigner: false, isWritable: false },
+        ])
+        .signers([admin])
+        .rpc();
+
+      const balanceAfter = await connection.getTokenAccountBalance(recipientAta);
+      assert.ok(
+        +balanceAfter.value.amount - +balanceBefore.value.amount === 1_000_000,
+        "Recipient should have received 1M tokens"
+      );
+
+      console.log("Authority executed whitelisted action: 1M tokens transferred");
+    });
+
+    it("execute_strategy_action — unauthorized caller rejected", async () => {
+      const instructionData = Buffer.alloc(9);
+      instructionData[0] = 3;
+      new BN(100_000).toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+      try {
+        await program.methods
+          .executeStrategyAction(Buffer.from(instructionData))
+          .accountsStrict({
+            caller: unauthorizedUser.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: allowedActionPda,
+            targetProgram: TOKEN_PROGRAM_ID,
+          })
+          .remainingAccounts([
+            { pubkey: strategyTokenAccount, isSigner: false, isWritable: true },
+            { pubkey: recipientAta, isSigner: false, isWritable: true },
+            { pubkey: vaultPda, isSigner: false, isWritable: false },
+          ])
+          .signers([unauthorizedUser])
+          .rpc();
+        assert.fail("Should have thrown UnauthorizedCaller");
+      } catch (e) {
+        assert.ok(
+          e.toString().includes("Unauthorized") || e.toString().includes("not delegate or authority"),
+          "Should be unauthorized caller error"
+        );
+        console.log("Unauthorized caller correctly rejected");
+      }
+    });
+
+    it("execute_strategy_action — wrong discriminator rejected", async () => {
+      // Use a different discriminator than what's whitelisted
+      const wrongData = Buffer.alloc(9);
+      wrongData[0] = 99; // wrong instruction index
+      new BN(100_000).toArrayLike(Buffer, "le", 8).copy(wrongData, 1);
+
+      try {
+        await program.methods
+          .executeStrategyAction(Buffer.from(wrongData))
+          .accountsStrict({
+            caller: delegateKp.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: allowedActionPda,
+            targetProgram: TOKEN_PROGRAM_ID,
+          })
+          .remainingAccounts([
+            { pubkey: strategyTokenAccount, isSigner: false, isWritable: true },
+            { pubkey: recipientAta, isSigner: false, isWritable: true },
+            { pubkey: vaultPda, isSigner: false, isWritable: false },
+          ])
+          .signers([delegateKp])
+          .rpc();
+        assert.fail("Should have thrown ActionNotAllowed");
+      } catch (e) {
+        assert.ok(
+          e.toString().includes("Action is not in the allowed list") || e.toString().includes("ActionNotAllowed"),
+          "Should be action not allowed error"
+        );
+        console.log("Wrong discriminator correctly rejected");
+      }
+    });
+
+    it("execute_strategy_action — deactivated action rejected", async () => {
+      // First deactivate the action
+      await program.methods
+        .removeAllowedAction()
+        .accountsStrict({
+          admin: admin.publicKey,
+          vaultState: vaultPda,
+          strategy: strategyPda,
+          allowedAction: allowedActionPda,
+        })
+        .signers([admin])
+        .rpc();
+
+      const instructionData = Buffer.alloc(9);
+      instructionData[0] = 3;
+      new BN(100_000).toArrayLike(Buffer, "le", 8).copy(instructionData, 1);
+
+      try {
+        await program.methods
+          .executeStrategyAction(Buffer.from(instructionData))
+          .accountsStrict({
+            caller: delegateKp.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: allowedActionPda,
+            targetProgram: TOKEN_PROGRAM_ID,
+          })
+          .remainingAccounts([
+            { pubkey: strategyTokenAccount, isSigner: false, isWritable: true },
+            { pubkey: recipientAta, isSigner: false, isWritable: true },
+            { pubkey: vaultPda, isSigner: false, isWritable: false },
+          ])
+          .signers([delegateKp])
+          .rpc();
+        assert.fail("Should have thrown ActionNotActive");
+      } catch (e) {
+        assert.ok(
+          e.toString().includes("Action is not active") || e.toString().includes("ActionNotActive"),
+          "Should be action not active error"
+        );
+        console.log("Deactivated action correctly rejected");
+      }
+    });
+  });
 });
