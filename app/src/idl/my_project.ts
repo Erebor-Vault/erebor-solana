@@ -14,6 +14,112 @@ export type MyProject = {
   },
   "instructions": [
     {
+      "name": "addAllowedAction",
+      "discriminator": [
+        3,
+        85,
+        56,
+        106,
+        26,
+        200,
+        135,
+        38
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "writable": true
+        },
+        {
+          "name": "allowedAction",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  97,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "strategy"
+              },
+              {
+                "kind": "account",
+                "path": "strategy.action_count",
+                "account": "strategyAllocation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "targetProgram",
+          "type": "pubkey"
+        },
+        {
+          "name": "discriminator",
+          "type": {
+            "array": [
+              "u8",
+              8
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "allocateToStrategy",
       "discriminator": [
         167,
@@ -750,6 +856,71 @@ export type MyProject = {
       ]
     },
     {
+      "name": "executeStrategyAction",
+      "discriminator": [
+        253,
+        178,
+        172,
+        207,
+        109,
+        222,
+        59,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "caller",
+          "docs": [
+            "The caller — must be either the strategy's delegate or the vault's authority."
+          ],
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "writable": true
+        },
+        {
+          "name": "allowedAction"
+        },
+        {
+          "name": "targetProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "instructionData",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
       "name": "initializeVault",
       "discriminator": [
         48,
@@ -896,6 +1067,65 @@ export type MyProject = {
       ]
     },
     {
+      "name": "migrateStrategy",
+      "discriminator": [
+        188,
+        181,
+        251,
+        24,
+        6,
+        65,
+        160,
+        157
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "writable": true
+        },
+        {
+          "name": "strategyTokenAccount",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "rebalanceStrategy",
       "discriminator": [
         30,
@@ -1009,6 +1239,92 @@ export type MyProject = {
         },
         {
           "name": "tokenProgram"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "removeAllowedAction",
+      "discriminator": [
+        241,
+        128,
+        231,
+        244,
+        121,
+        179,
+        157,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy"
+        },
+        {
+          "name": "allowedAction",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  97,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "strategy"
+              },
+              {
+                "kind": "account",
+                "path": "allowed_action.action_id",
+                "account": "allowedAction"
+              }
+            ]
+          }
         }
       ],
       "args": []
@@ -1279,14 +1595,7 @@ export type MyProject = {
           "writable": true
         },
         {
-          "name": "strategyTokenAccount",
-          "writable": true
-        },
-        {
           "name": "newDelegate"
-        },
-        {
-          "name": "tokenProgram"
         }
       ],
       "args": []
@@ -1529,6 +1838,19 @@ export type MyProject = {
   ],
   "accounts": [
     {
+      "name": "allowedAction",
+      "discriminator": [
+        9,
+        21,
+        14,
+        155,
+        239,
+        201,
+        5,
+        93
+      ]
+    },
+    {
       "name": "strategyAllocation",
       "discriminator": [
         74,
@@ -1600,23 +1922,103 @@ export type MyProject = {
       "code": 6008,
       "name": "insufficientReserveForRebalance",
       "msg": "Insufficient reserve for rebalance allocation"
+    },
+    {
+      "code": 6009,
+      "name": "unauthorizedCaller",
+      "msg": "Unauthorized: not delegate or authority"
+    },
+    {
+      "code": 6010,
+      "name": "actionNotAllowed",
+      "msg": "Action is not in the allowed list for this strategy"
+    },
+    {
+      "code": 6011,
+      "name": "actionNotActive",
+      "msg": "Action is not active"
+    },
+    {
+      "code": 6012,
+      "name": "invalidStrategy",
+      "msg": "Invalid strategy reference"
+    },
+    {
+      "code": 6013,
+      "name": "invalidInstructionData",
+      "msg": "Instruction data too short or invalid"
     }
   ],
   "types": [
+    {
+      "name": "allowedAction",
+      "docs": [
+        "AllowedAction — a whitelisted (program, instruction) pair for a strategy.",
+        "",
+        "Seeds: [\"allowed_action\", strategy.key(), &action_id.to_le_bytes()]",
+        "Each strategy has its own independent whitelist of allowed actions.",
+        "The delegate (or authority) can only execute CPI calls that match an active AllowedAction."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "strategy",
+            "docs": [
+              "Back-reference to the StrategyAllocation this action belongs to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "targetProgram",
+            "docs": [
+              "The external program to CPI into (e.g. Lulo, Kamino, Drift)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "discriminator",
+            "docs": [
+              "Anchor instruction discriminator (first 8 bytes of instruction data)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "actionId",
+            "docs": [
+              "Sequential ID within the strategy."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "isActive",
+            "docs": [
+              "Whether this action is active. Can be deactivated without closing."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "strategyAllocation",
       "docs": [
         "StrategyAllocation — metadata for a single strategy.",
         "",
         "Seeds: [\"strategy\", vault_state.key(), &strategy_id.to_le_bytes()]",
-        "Each strategy = one \"pocket\" where the vault can delegate tokens to an external protocol.",
-        "",
-        "This is the workaround for Solana's 1-delegate-per-account limitation:",
-        "instead of one account with multiple delegates (impossible),",
-        "we create multiple accounts each with one delegate.",
-        "",
-        "Think of it like: you can't give 3 people a key to the same safe,",
-        "but you CAN create 3 safes and give one key each."
+        "Each strategy = one \"pocket\" where the vault can delegate tokens to an external protocol."
       ],
       "type": {
         "kind": "struct",
@@ -1638,26 +2040,21 @@ export type MyProject = {
           {
             "name": "delegate",
             "docs": [
-              "The external protocol address approved as delegate on this strategy's token account.",
-              "This protocol can spend tokens up to the account balance.",
-              "Like calling IERC20.approve(protocol, amount) in Solidity."
+              "The external protocol address approved as delegate on this strategy's token account."
             ],
             "type": "pubkey"
           },
           {
             "name": "allocatedAmount",
             "docs": [
-              "How many tokens are currently allocated to this strategy.",
-              "Tracked separately because the delegate might have spent some."
+              "How many tokens are currently allocated to this strategy."
             ],
             "type": "u64"
           },
           {
             "name": "tokenAccount",
             "docs": [
-              "The PDA token account holding this strategy's tokens.",
-              "Seeds: [\"strategy_token\", vault_state, strategy_id].",
-              "Owned by vault PDA, with delegate set to the external protocol."
+              "The PDA token account holding this strategy's tokens."
             ],
             "type": "pubkey"
           },
@@ -1671,9 +2068,7 @@ export type MyProject = {
           {
             "name": "targetWeightBps",
             "docs": [
-              "Target allocation weight in basis points (0-10000). E.g., 5000 = 50% of total_deposited.",
-              "Used by rebalance_strategy to automatically calculate target allocation.",
-              "Weights across all strategies do NOT need to sum to 10000 — the remainder stays in reserve."
+              "Target allocation weight in basis points (0-10000)."
             ],
             "type": "u16"
           },
@@ -1683,6 +2078,13 @@ export type MyProject = {
               "PDA bump."
             ],
             "type": "u8"
+          },
+          {
+            "name": "actionCount",
+            "docs": [
+              "Count of AllowedAction PDAs for this strategy."
+            ],
+            "type": "u16"
           }
         ]
       }
@@ -1692,10 +2094,8 @@ export type MyProject = {
       "docs": [
         "VaultState — the main configuration account for a vault.",
         "",
-        "Seeds: [\"vault\", token_mint.key()]",
-        "One vault per token mint — a USDC vault and a USDT vault get separate PDAs.",
-        "",
-        "Seeds derive a unique address, bump is stored for efficient re-derivation."
+        "Seeds: [\"vault\", token_mint.key(), vault_id]",
+        "Multiple vaults can exist per token type using different vault_id values."
       ],
       "type": {
         "kind": "struct",
@@ -1703,65 +2103,56 @@ export type MyProject = {
           {
             "name": "admin",
             "docs": [
-              "The admin — can create/deactivate strategies and change delegates.",
-              "Set to whoever calls initialize_vault. Like Ownable's owner in Solidity."
+              "The admin — can create/deactivate strategies and change delegates."
             ],
             "type": "pubkey"
           },
           {
             "name": "authority",
             "docs": [
-              "The operational authority — can allocate/deallocate funds between reserve and strategies.",
-              "Separated from admin so a bot can rebalance without admin privileges."
+              "The operational authority — can allocate/deallocate funds between reserve and strategies."
             ],
             "type": "pubkey"
           },
           {
             "name": "tokenMint",
             "docs": [
-              "The accepted deposit token mint (e.g. USDC).",
-              "The vault only accepts this token — like a single-asset ERC-4626 vault."
+              "The accepted deposit token mint (e.g. USDC)."
             ],
             "type": "pubkey"
           },
           {
             "name": "shareMint",
             "docs": [
-              "The vault's share token mint (created as a PDA during initialize_vault).",
-              "Only this program can mint/burn shares (vault PDA = mint authority)."
+              "The vault's share token mint (created as a PDA during initialize_vault)."
             ],
             "type": "pubkey"
           },
           {
             "name": "vaultId",
             "docs": [
-              "Unique vault ID — allows multiple vaults for the same token mint.",
-              "Included in the PDA seeds: [\"vault\", token_mint, vault_id]."
+              "Unique vault ID — allows multiple vaults for the same token mint."
             ],
             "type": "u64"
           },
           {
             "name": "totalDeposited",
             "docs": [
-              "Total underlying tokens in the vault (reserve + all strategies).",
-              "This is the ACCOUNTING total — doesn't change when funds move to strategies.",
-              "Only changes on deposit (+) and withdraw (-).",
-              "Tracks total vault assets."
+              "Total underlying tokens in the vault (reserve + all strategies)."
             ],
             "type": "u64"
           },
           {
             "name": "strategyCount",
             "docs": [
-              "Auto-incrementing strategy ID counter (0, 1, 2, ...).",
-              "Only goes up — deactivated strategies keep their IDs to prevent seed collisions."
+              "Auto-incrementing strategy ID counter (0, 1, 2, ...)."
             ],
             "type": "u64"
           },
           {
             "name": "bump",
             "docs": [
-              "PDA bump. Stored so we don't recalculate it every time we need PDA signing."
+              "PDA bump."
             ],
             "type": "u8"
           },

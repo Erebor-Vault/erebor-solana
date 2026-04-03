@@ -65,3 +65,18 @@ export function deriveUserAta(
 ): PublicKey {
   return getAssociatedTokenAddressSync(mint, owner);
 }
+
+export function deriveAllowedActionPda(
+  strategy: PublicKey,
+  actionId: number
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("allowed_action"),
+      strategy.toBuffer(),
+      new BN(actionId).toArrayLike(Buffer, "le", 2),
+    ],
+    PROGRAM_ID
+  );
+  return pda;
+}

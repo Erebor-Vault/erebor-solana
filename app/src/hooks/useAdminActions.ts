@@ -4,13 +4,13 @@ import { useState, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import BN from "bn.js";
 import { useVaultProgram } from "./useVaultProgram";
 import { useVault } from "@/components/providers/VaultProvider";
 import {
   deriveStrategyPda,
   deriveStrategyTokenPda,
   deriveReserveAta,
+  deriveAllowedActionPda,
 } from "@/lib/pda";
 
 export function useAdminActions() {
@@ -87,7 +87,6 @@ export function useAdminActions() {
   const updateDelegate = useCallback(
     async (
       strategyId: number,
-      strategyTokenAccount: PublicKey,
       newDelegate: PublicKey
     ): Promise<string> => {
       if (!program || !wallet.publicKey) throw new Error("Not ready");
@@ -102,9 +101,7 @@ export function useAdminActions() {
             admin: wallet.publicKey,
             vaultState: vaultPda,
             strategy: strategyPda,
-            strategyTokenAccount,
             newDelegate,
-            tokenProgram: TOKEN_PROGRAM_ID,
           })
           .rpc();
 
@@ -143,5 +140,75 @@ export function useAdminActions() {
     [program, wallet.publicKey, vaultPda, refresh]
   );
 
-  return { createStrategy, deactivateStrategy, updateDelegate, setStrategyWeight, loading };
+  const addAllowedAction = useCallback(
+    async (
+      strategyId: number,
+      actionCount: number,
+      targetProgram: PublicKey,
+      discriminator: number[]
+    ): Promise<string> => {
+      if (!program || !wallet.publicKey) throw new Error("Not ready");
+
+      setLoading(true);
+      try {
+        const strategyPda = deriveStrategyPda(vaultPda, strategyId);
+        const allowedActionPda = deriveAllowedActionPda(strategyPda, actionCount);
+
+        const sig = await program.methods
+          .addAllowedAction(targetProgram, discriminator)
+          .accountsStrict({
+            admin: wallet.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: allowedActionPda,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+
+        await refresh();
+        return sig;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [program, wallet.publicKey, vaultPda, refresh]
+  );
+
+  const removeAllowedAction = useCallback(
+    async (strategyId: number, actionId: number): Promise<string> => {
+      if (!program || !wallet.publicKey) throw new Error("Not ready");
+
+      setLoading(true);
+      try {
+        const strategyPda = deriveStrategyPda(vaultPda, strategyId);
+        const allowedActionPda = deriveAllowedActionPda(strategyPda, actionId);
+
+        const sig = await program.methods
+          .removeAllowedAction()
+          .accountsStrict({
+            admin: wallet.publicKey,
+            vaultState: vaultPda,
+            strategy: strategyPda,
+            allowedAction: allowedActionPda,
+          })
+          .rpc();
+
+        await refresh();
+        return sig;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [program, wallet.publicKey, vaultPda, refresh]
+  );
+
+  return {
+    createStrategy,
+    deactivateStrategy,
+    updateDelegate,
+    setStrategyWeight,
+    addAllowedAction,
+    removeAllowedAction,
+    loading,
+  };
 }
