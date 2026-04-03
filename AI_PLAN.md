@@ -2,9 +2,9 @@
 
 ## Context
 
-We have a vault program with a delegate pattern: `create_strategy(delegate)` approves an external keypair to spend from a strategy token account. We want to build an AI agent that acts as this delegate — when tokens are allocated to its strategy, it uses **Claude (Anthropic)** as the LLM to make autonomous lending decisions via **Lulo** (Solana's lending aggregator that routes to Kamino, Drift, MarginFi for best yield).
+We have a vault program with an **action whitelisting model**: the admin creates strategies, assigns delegates, and whitelists specific (program, instruction) pairs. The delegate calls `execute_strategy_action` to request the vault to CPI into an external protocol — the vault validates against the whitelist and signs via `invoke_signed`.
 
-**Key challenge**: Solana Agent Kit's `lendAssets()` lends from the agent's own wallet ATA, not from a delegate-approved PDA. Solution: two-step transfer (strategy_token_account → agent ATA → Lulo).
+**Key change from v1**: The delegate no longer has SPL token spending authority. All token movement goes through the vault program's CPI routing. The two-step transfer workaround (strategy → agent ATA → Lulo) is eliminated — the vault CPIs directly into the target protocol.
 
 **LLM**: Anthropic Claude — the agent uses Claude to reason about when/how much to lend, evaluate yields, and decide on rebalancing.
 
@@ -67,9 +67,10 @@ Cost-optimized: only called on state changes, Haiku for routine, Sonnet for comp
 
 ### Step 5: Core lending strategy
 
-Two-step transfer pattern:
-- Lend: strategy_token_account → agent ATA → Lulo
-- Withdraw: Lulo → agent ATA → strategy_token_account
+Direct CPI pattern via `execute_strategy_action`:
+- Lend: agent calls `execute_strategy_action` → vault CPIs into Lulo deposit
+- Withdraw: agent (or authority) calls `execute_strategy_action` → vault CPIs into Lulo withdraw
+- No tokens flow through the agent's wallet
 
 ### Step 6: Monitoring loop
 

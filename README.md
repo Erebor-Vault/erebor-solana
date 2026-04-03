@@ -94,9 +94,9 @@ On Solana, each SPL token account can only have **one delegate** at a time. To g
 
 | Role | Who | Permissions |
 |------|-----|-------------|
-| **Admin** | Set at vault init | Create/deactivate strategies, change delegates, set weights |
-| **Authority** | Defaults to admin | Allocate/deallocate between reserve and strategies, rebalance |
-| **Delegate** | AI agent keypair | Spend from assigned strategy token account |
+| **Admin** | Set at vault init | Create/deactivate strategies, change delegates, set weights, manage action whitelists |
+| **Authority** | Defaults to admin | Allocate/deallocate between reserve and strategies, rebalance, execute whitelisted actions |
+| **Delegate** | AI agent keypair | Request whitelisted actions via `execute_strategy_action` (no direct token spending) |
 | **User** | Anyone | Deposit, withdraw by burning shares |
 
 ---
@@ -121,11 +121,11 @@ The curator role is similar to how Gauntlet curates Morpho vaults or Steakhouse 
 
 ### For agents
 
-An AI agent sees exactly one thing: its assigned strategy token account. The vault PDA owns this account; the agent is just the delegate with spending permission.
+An AI agent interacts with the vault through the `execute_strategy_action` instruction. The agent requests the vault to CPI into an external protocol — the vault validates the action against a per-strategy whitelist and signs the CPI with its PDA.
 
-**What agents can do:** spend tokens from their assigned strategy account via delegate authority.
+**What agents can do:** request whitelisted actions on their assigned strategy (e.g., deposit into Lulo, withdraw from Kamino).
 
-**What agents cannot do:** touch the reserve, access other strategies, mint shares, or modify vault state.
+**What agents cannot do:** call non-whitelisted instructions, touch the reserve, access other strategies, mint shares, directly spend from the strategy token account, or modify vault state.
 
 ---
 
@@ -136,13 +136,19 @@ An AI agent sees exactly one thing: its assigned strategy token account. The vau
 | `initialize_vault` | Create vault state + share mint + reserve ATA | Admin |
 | `deposit(amount)` | Transfer tokens to reserve, mint proportional shares | User |
 | `withdraw(shares_to_burn)` | Burn shares, receive proportional tokens | User |
-| `create_strategy` | Create strategy PDA + token account, approve delegate | Admin |
+| `create_strategy` | Create strategy PDA + token account, register delegate | Admin |
 | `allocate_to_strategy(amount)` | Move tokens: reserve → strategy | Authority |
 | `deallocate_from_strategy(amount)` | Move tokens: strategy → reserve | Authority |
 | `set_strategy_weight(weight_bps)` | Set target allocation weight (basis points, 0–10000) | Admin |
-| `rebalance_strategy` | Move funds to/from strategy to match target weight | Authority |
-| `update_strategy_delegate` | Revoke old delegate, approve new one | Admin |
-| `deactivate_strategy` | Revoke delegate, return funds, mark permanently inactive | Admin |
+| `rebalance_strategy` | Move funds to/from strategy to match target weight | Anyone |
+| `update_strategy_delegate` | Change the delegate address | Admin |
+| `deactivate_strategy` | Return funds, mark permanently inactive | Admin |
+| `add_allowed_action(program, discriminator)` | Whitelist a (program, instruction) pair for a strategy | Admin |
+| `remove_allowed_action` | Deactivate a whitelisted action | Admin |
+| `execute_strategy_action(instruction_data)` | CPI into external protocol via vault PDA (whitelist-checked) | Delegate or Authority |
+| `migrate_strategy` | One-time: revoke old SPL delegate, init action_count | Admin |
+| `transfer_admin(new_admin)` | Transfer admin role | Admin |
+| `set_authority(new_authority)` | Change operational authority | Admin |
 
 ---
 
@@ -152,11 +158,14 @@ An AI agent sees exactly one thing: its assigned strategy token account. The vau
 
 - Vault PDA owns all token accounts — no single keypair holds funds
 - Admin/Authority separation — governance and operations are independent roles
-- Delegate sandboxing — each agent scoped to its own token account only
+- **Action whitelisting** — delegates can only call admin-approved (program, instruction) pairs via CPI
+- **No direct spending** — delegates have no SPL token authority; all token movement goes through the vault program
+- Delegate sandboxing — each agent scoped to its own strategy's whitelisted actions
 - Deactivation is permanent — once a strategy is shut down, it can never be reactivated
+- Authority can force-withdraw from external protocols if delegate goes offline
 - Anchor constraints validate all accounts before instruction execution
 
-**Honest limitation:** The vault cannot cryptographically prevent bad trades or downstream protocol exploits. Max loss equals one strategy's allocation. The curator is responsible for choosing reliable agents.
+**Honest limitation:** The vault validates *which* programs/instructions can be called, but not *amounts* or *economic soundness*. Max loss equals one strategy's allocation. The curator is responsible for choosing reliable agents and appropriate whitelists.
 
 ---
 
@@ -176,9 +185,20 @@ An AI agent sees exactly one thing: its assigned strategy token account. The vau
 ```
 erebor/
 ├── programs/my_project/src/
-│   └── lib.rs                    # Anchor program
+│   ├── lib.rs                    # Entry point (thin dispatcher)
+│   ├── state.rs                  # VaultState, StrategyAllocation, AllowedAction
+│   ├── errors.rs                 # VaultError enum
+│   └── instructions/             # One file per instruction
+│       ├── initialize_vault.rs
+│       ├── deposit.rs / withdraw.rs
+│       ├── create_strategy.rs / deactivate_strategy.rs
+│       ├── allocate_to_strategy.rs / deallocate_from_strategy.rs
+│       ├── add_allowed_action.rs / remove_allowed_action.rs
+│       ├── execute_strategy_action.rs   # Core CPI routing
+│       ├── migrate_strategy.rs
+│       └── ...
 ├── tests/
-│   └── my_project.ts             # Integration tests
+│   └── my_project.ts             # Integration tests (47 tests)
 ├── app/                          # Next.js frontend
 │   └── src/
 │       ├── app/                  # Pages (home, admin)
@@ -238,7 +258,8 @@ bun run start
 
 - [ ] Example AI agent integration (Claude + Solana Agent Kit + Lulo)
 - [ ] Auto-rebalance crank (periodic weight enforcement)
-- [ ] Policy cage contracts (token + protocol allowlists)
+- [x] Policy cage contracts (action whitelisting per strategy)
+- [ ] Per-action parameter constraints (max amount, cooldown)
 - [ ] Velocity controls (max capital moved per time window)
 - [ ] Drawdown circuit breakers (auto-deactivate at threshold)
 - [ ] On-chain decision event emissions
@@ -257,6 +278,11 @@ bun run start
 | `ZeroAmount` | Amount must be > 0 |
 | `WeightExceedsMax` | Weight exceeds 10000 bps |
 | `InsufficientReserveForRebalance` | Reserve can't cover rebalance allocation |
+| `UnauthorizedCaller` | Signer is neither the strategy's delegate nor the vault authority |
+| `ActionNotAllowed` | (program, discriminator) not in strategy's whitelist |
+| `ActionNotActive` | AllowedAction has been deactivated |
+| `InvalidStrategy` | Strategy reference mismatch |
+| `InvalidInstructionData` | Instruction data too short or malformed |
 
 ## License
 

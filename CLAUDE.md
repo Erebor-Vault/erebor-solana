@@ -40,12 +40,18 @@ anchor deploy
 
 ## Architecture
 
-- **`programs/my_project/src/lib.rs`** — Anchor program entry point. Contains instruction handlers and account structs.
-- **`tests/`** — TypeScript integration tests using `@coral-xyz/anchor` client, Mocha, and Chai. Tests run against a local validator.
-- **`target/types/`** — Auto-generated TypeScript IDL types (created by `anchor build`). Imported by tests.
-- **`migrations/deploy.ts`** — Anchor migration/deploy script.
+- **`programs/my_project/src/lib.rs`** — Anchor program entry point (thin dispatcher).
+- **`programs/my_project/src/state.rs`** — Account structs: VaultState, StrategyAllocation, AllowedAction.
+- **`programs/my_project/src/errors.rs`** — VaultError enum.
+- **`programs/my_project/src/instructions/`** — One file per instruction (handler + accounts struct).
+- **`tests/`** — TypeScript integration tests using `@coral-xyz/anchor` client, Mocha, and Chai.
+- **`target/types/`** — Auto-generated TypeScript IDL types (created by `anchor build`).
+- **`app/`** — Next.js 16 frontend with React hooks for program interaction.
+- **`agent/`** — AI agent placeholder (Claude + Solana Agent Kit).
 
 ## Key Patterns
 
-- Anchor workspace pattern: tests access the program via `anchor.workspace.myProject` after setting the provider with `anchor.AnchorProvider.env()`.
-- Account validation structs (e.g., `Initialize`) use `#[derive(Accounts)]` and are paired with instruction handlers in the `#[program]` module.
+- **Modular instructions**: each instruction lives in its own file under `instructions/`. Handler function + `#[derive(Accounts)]` struct co-located.
+- **Action whitelisting**: strategies use per-strategy AllowedAction PDAs. Delegates call `execute_strategy_action` which validates against the whitelist and CPIs via `invoke_signed`.
+- **Role model**: Admin (governance), Authority (operations), Delegate (action requester — no SPL spending authority).
+- Anchor workspace pattern: tests access the program via `anchor.workspace.myProject`.
