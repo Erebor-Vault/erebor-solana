@@ -1,3 +1,18 @@
+// monitor.ts — Main polling loop that drives the agent's decision cycle.
+//
+// This module implements the core agent loop:
+//   1. Read on-chain state (strategy account + token balance)
+//   2. Apply hard rules (no LLM needed): deactivation → withdraw all, signal file → withdraw
+//   3. Detect state changes (balance delta from previous cycle)
+//   4. If state changed → ask Claude Sonnet for a decision
+//      If routine (no change) → every 10th cycle, ask Claude Haiku to re-evaluate yield
+//   5. Execute the decision via the protocol adapter (mock or real Lulo)
+//   6. Update tracking state and wait for next cycle
+//
+// Error handling: individual poll cycle failures increment a counter.
+// After MAX_RETRIES consecutive failures, the loop enters a 60-second cooldown
+// before resuming. This prevents rapid-fire failing calls that waste resources.
+
 import { Program } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import fs from "fs";
@@ -12,15 +27,19 @@ import type {
 import { fetchStrategy, fetchTokenBalance } from "./vault-client.js";
 import { LLMAdvisor } from "./llm-advisor.js";
 
+// Starts the infinite polling loop. This function never returns under normal operation.
+// It catches errors per-cycle and implements backoff logic for consecutive failures.
 export async function startMonitorLoop(
   program: Program<MyProject>,
   connection: Connection,
   config: AgentConfig,
-  strategyPda: PublicKey,
-  strategyTokenPda: PublicKey,
-  protocol: LuloProtocol,
-  advisor: LLMAdvisor
+  strategyPda: PublicKey,       // this agent's strategy PDA
+  strategyTokenPda: PublicKey,  // the strategy's SPL token account PDA
+  protocol: LuloProtocol,      // mock or real Lulo adapter
+  advisor: LLMAdvisor           // Claude LLM decision engine
 ): Promise<void> {
+  // Mutable state that persists across polling cycles (in-memory only).
+  // lastBalance starts at -1 to indicate "first run" (no previous data).
   const state: MonitorState = {
     lastBalance: -1,
     lastDecisionTime: 0,
@@ -31,6 +50,7 @@ export async function startMonitorLoop(
 
   console.log("Monitor loop started. Polling every", config.pollIntervalMs / 1000, "seconds.\n");
 
+  // Infinite loop — runs until process exit (SIGINT, SIGTERM, or strategy deactivation).
   while (true) {
     try {
       await pollCycle(
@@ -43,7 +63,7 @@ export async function startMonitorLoop(
         advisor,
         state
       );
-      state.consecutiveErrors = 0;
+      state.consecutiveErrors = 0; // reset on success
     } catch (error) {
       state.consecutiveErrors++;
       console.error(
@@ -51,6 +71,8 @@ export async function startMonitorLoop(
         error
       );
 
+      // After too many consecutive failures, cool down for 60 seconds.
+      // This handles scenarios like RPC provider outages or rate limiting.
       if (state.consecutiveErrors >= config.maxRetries) {
         console.error("[ERROR] Too many failures, cooling down for 60s...");
         await sleep(60_000);
@@ -62,6 +84,7 @@ export async function startMonitorLoop(
   }
 }
 
+// Executes a single polling cycle. Called every POLL_INTERVAL_MS.
 async function pollCycle(
   program: Program<MyProject>,
   connection: Connection,
@@ -75,7 +98,9 @@ async function pollCycle(
   const now = new Date();
   console.log(`--- ${now.toISOString()} ---`);
 
-  // 1. Read on-chain state
+  // ── Step 1: Read on-chain state ──────────────────────────────────────────
+  // Fetch the strategy account (metadata) and the actual token balance.
+  // These are independent RPC calls to the Solana validator.
   const strategy = await fetchStrategy(program, strategyPda);
   const tokenBalance = await fetchTokenBalance(connection, strategyTokenPda);
 
@@ -86,9 +111,12 @@ async function pollCycle(
     timestamp: Date.now(),
   };
 
-  // 2. Hard rules (no LLM)
+  // ── Step 2: Hard rules (no LLM needed) ────────────────────────────────────
+  // These take priority over any LLM decision and execute immediately.
 
-  // Strategy deactivated — withdraw everything and exit
+  // HARD RULE: Strategy deactivated → withdraw all from lending protocol and exit.
+  // Deactivation is permanent (set by admin via deactivate_strategy).
+  // The agent has no purpose once its strategy is inactive.
   if (!snapshot.isActive) {
     console.log("  Strategy DEACTIVATED. Withdrawing all from protocol...");
     const lentBalance = await protocol.getLentBalance();
@@ -99,24 +127,32 @@ async function pollCycle(
     process.exit(0);
   }
 
-  // Withdrawal signal from authority
+  // HARD RULE: Withdrawal signal file from the vault authority.
+  // The authority creates a JSON file to tell the agent to withdraw a specific amount.
+  // This enables the authority to coordinate: withdraw from Lulo → deallocate → user withdraws.
   const signal = readWithdrawSignal(config.withdrawSignalPath);
   if (signal) {
     console.log(
       `  Withdraw signal detected: ${(signal.amount / 1e6).toFixed(2)} USDC (requested by ${signal.requestedBy})`
     );
     await protocol.execute({ action: "WITHDRAW", amount: signal.amount });
+    // Delete the signal file after processing to prevent re-execution.
     deleteWithdrawSignal(config.withdrawSignalPath);
     state.lastBalance = tokenBalance;
     state.lastSnapshot = snapshot;
     return;
   }
 
-  // 3. Detect state changes
+  // ── Step 3: Detect state changes ──────────────────────────────────────────
+  // Compare current balance to previous cycle. A balance change means:
+  // - The authority allocated more funds (positive delta)
+  // - The authority deallocated funds (negative delta)
+  // - Yield was reported (positive delta, smaller magnitude)
   const isFirstRun = state.lastBalance === -1;
   const balanceDelta = isFirstRun ? 0 : tokenBalance - state.lastBalance;
   const stateChanged = isFirstRun || balanceDelta !== 0;
 
+  // Fetch current yield and lent balance from the protocol adapter.
   const yieldRate = await protocol.getCurrentYield();
   const lentBalance = await protocol.getLentBalance();
 
@@ -126,14 +162,18 @@ async function pollCycle(
     }`
   );
 
-  // 4. Decision
+  // ── Step 4: LLM Decision ──────────────────────────────────────────────────
+  // Only consult the LLM when something meaningful happened:
+  // - State changed: new funds, balance delta, first run
+  // - Routine re-evaluation: every 10th cycle with no changes (re-check yield)
   let shouldConsult = false;
 
   if (stateChanged) {
     shouldConsult = true;
   } else {
     state.routineCycleCount++;
-    // Every 10th routine cycle, re-evaluate with Haiku
+    // Every 10th routine cycle (~5 minutes at 30s intervals), re-evaluate
+    // yield conditions using the cheaper Haiku model.
     if (state.routineCycleCount >= 10) {
       shouldConsult = true;
       state.routineCycleCount = 0;
@@ -141,16 +181,19 @@ async function pollCycle(
   }
 
   if (shouldConsult) {
+    // Ask Claude for a decision. Uses Sonnet for state changes (more capable),
+    // Haiku for routine checks (cheaper, faster).
     const decision = await advisor.getDecision(
       snapshot,
       state.lastSnapshot,
       yieldRate,
       lentBalance,
-      stateChanged // use Sonnet for state changes, Haiku for routine
+      stateChanged // true = Sonnet, false = Haiku
     );
 
     if (decision.action === "LEND") {
-      // Validate: don't lend more than idle balance
+      // Safety: cap the lend amount at the idle balance (tokens not already lent).
+      // This prevents the LLM from accidentally trying to lend more than available.
       const idleBalance = tokenBalance - lentBalance;
       const amount = Math.min(decision.amount, idleBalance);
       if (amount >= config.minLendAmount) {
@@ -161,6 +204,7 @@ async function pollCycle(
         );
       }
     } else if (decision.action === "WITHDRAW") {
+      // Safety: cap the withdraw amount at the lent balance.
       const amount = Math.min(decision.amount, lentBalance);
       if (amount > 0) {
         await protocol.execute({ action: "WITHDRAW", amount });
@@ -168,18 +212,24 @@ async function pollCycle(
         console.log("  Skipping WITHDRAW — nothing lent");
       }
     }
-    // HOLD: do nothing
+    // HOLD: do nothing, just log (already logged by the advisor)
   } else {
     console.log("  No changes — holding.");
   }
 
-  // 5. Update state
+  // ── Step 5: Update tracking state ─────────────────────────────────────────
   state.lastBalance = tokenBalance;
   state.lastSnapshot = snapshot;
 }
 
-// --- Withdraw signal file ---
+// =============================================================================
+// WITHDRAWAL SIGNAL FILE
+// The vault authority coordinates withdrawals by writing a JSON file:
+//   { "amount": 5000000, "requestedAt": "2026-04-06T...", "requestedBy": "admin" }
+// The agent reads it, withdraws from Lulo, and deletes the file.
+// =============================================================================
 
+// Reads and validates the withdrawal signal file. Returns null if not found or invalid.
 function readWithdrawSignal(path: string): WithdrawSignal | null {
   try {
     if (!fs.existsSync(path)) return null;
@@ -192,11 +242,13 @@ function readWithdrawSignal(path: string): WithdrawSignal | null {
   }
 }
 
+// Deletes the signal file after it's been processed.
+// Silently handles the case where it's already gone.
 function deleteWithdrawSignal(path: string): void {
   try {
     fs.unlinkSync(path);
   } catch {
-    // Already deleted or doesn't exist
+    // File already deleted or doesn't exist — not an error
   }
 }
 
