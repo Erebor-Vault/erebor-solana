@@ -115,7 +115,8 @@ export interface AgentConfig {
   strategyId: number;          // which strategy this agent manages
   pollIntervalMs: number;      // how often to check on-chain state (default: 30s)
   minLendAmount: number;       // minimum micro-USDC to trigger a lending action
-  useMockLulo: boolean;        // true = simulate Lulo in memory (devnet), false = real CPI
+  luloProgramId: PublicKey;    // target protocol program ID (mock_lulo on devnet, Lulo on mainnet)
+  luloTreasury: PublicKey;     // protocol's treasury token account PDA
   withdrawSignalPath: string;  // path to the withdrawal signal JSON file
   maxRetries: number;          // max retry attempts for transient errors
   retryDelayMs: number;        // base delay between retries (multiplied by attempt number)

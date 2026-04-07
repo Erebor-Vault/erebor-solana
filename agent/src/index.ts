@@ -28,7 +28,7 @@ import {
   fetchStrategy,
   fetchTokenBalance,
 } from "./vault-client.js";
-import { MockLuloProtocol } from "./strategy.js";
+import { OnChainLuloProtocol } from "./strategy.js";
 import { LLMAdvisor } from "./llm-advisor.js";
 import { startMonitorLoop } from "./monitor.js";
 
@@ -46,7 +46,8 @@ async function main() {
   console.log(`RPC:        ${config.rpcUrl}`);
   console.log(`Vault ID:   ${config.vaultId}`);
   console.log(`Strategy:   ${config.strategyId}`);
-  console.log(`Mock Lulo:  ${config.useMockLulo}`);
+  console.log(`Protocol:   ${config.luloProgramId.toBase58()}`);
+  console.log(`Treasury:   ${config.luloTreasury.toBase58()}`);
   console.log(`Poll:       ${config.pollIntervalMs / 1000}s`);
   console.log(`Min lend:   ${(config.minLendAmount / 1e6).toFixed(2)} USDC\n`);
 
@@ -107,23 +108,22 @@ async function main() {
   );
 
   // ── Step 5: Initialize protocol adapter ───────────────────────────────────
-  // Mock mode: simulates Lulo in memory (devnet — no real Lulo deployed).
-  // Real mode: builds CPI instructions and calls execute_strategy_action (mainnet).
-  let protocol;
-  if (config.useMockLulo) {
-    console.log("Using MOCK Lulo protocol (devnet mode)\n");
-    protocol = new MockLuloProtocol();
-  } else {
-    console.log("Using REAL Lulo protocol (mainnet mode)\n");
-    // Real Lulo integration requires:
-    // 1. Lulo's on-chain program ID
-    // 2. Anchor discriminators for deposit/withdraw instructions
-    // 3. Required account layout for each instruction
-    // These need to be determined from Lulo's IDL or by inspecting mainnet txs.
-    throw new Error(
-      "Real Lulo integration not yet implemented. Set USE_MOCK_LULO=true for devnet."
-    );
-  }
+  // Same code path for devnet (mock_lulo program) and mainnet (real Lulo).
+  // The only difference is the program ID and treasury PDA, configured via .env.
+  console.log(`Protocol:   ${config.luloProgramId.toBase58()}`);
+  console.log(`Treasury:   ${config.luloTreasury.toBase58()}\n`);
+
+  const protocol = new OnChainLuloProtocol(
+    program,
+    connection,
+    config,
+    vaultPda,
+    strategyPda,
+    strategyTokenPda,
+    config.luloProgramId,
+    config.luloTreasury,
+    config.vaultTokenMint,
+  );
 
   // ── Step 6: Initialize LLM advisor ────────────────────────────────────────
   // Wraps the Anthropic Claude API. Uses Haiku for routine checks, Sonnet for

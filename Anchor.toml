@@ -7,9 +7,11 @@ skip-lint = false
 
 [programs.devnet]
 my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
 
 [programs.localnet]
 my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
 
 [programs.mainnet]
 my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"

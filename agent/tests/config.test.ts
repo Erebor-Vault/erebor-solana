@@ -24,8 +24,7 @@ afterEach(() => {
   process.env = originalEnv;
 });
 
-// Helper: sets the three REQUIRED env vars (SOLANA_PRIVATE_KEY, ANTHROPIC_API_KEY,
-// VAULT_TOKEN_MINT) to valid values. Without these, loadConfig() always throws.
+// Helper: sets ALL required env vars to valid values. Without these, loadConfig() throws.
 // Returns the generated keypair so tests can verify the agent's public key.
 function setMinimumEnv() {
   const keypair = Keypair.generate();
@@ -33,6 +32,8 @@ function setMinimumEnv() {
   process.env.SOLANA_PRIVATE_KEY = base58Key;
   process.env.ANTHROPIC_API_KEY = "test-api-key";
   process.env.VAULT_TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  process.env.LULO_PROGRAM_ID = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE";
+  process.env.LULO_TREASURY = "So11111111111111111111111111111111111111112";
   return { keypair, base58Key };
 }
 
@@ -72,7 +73,8 @@ describe("loadConfig", () => {
     expect(config.strategyId).toBe(0);
     expect(config.pollIntervalMs).toBe(30000);       // 30 seconds
     expect(config.minLendAmount).toBe(1000000);       // 1 USDC (6 decimals)
-    expect(config.useMockLulo).toBe(true);            // devnet by default
+    expect(config.luloProgramId.toBase58()).toBe("ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE");
+    expect(config.luloTreasury.toBase58()).toBe("So11111111111111111111111111111111111111112");
     expect(config.maxRetries).toBe(3);
     expect(config.retryDelayMs).toBe(2000);           // 2 seconds
   });
@@ -86,7 +88,6 @@ describe("loadConfig", () => {
     process.env.STRATEGY_ID = "3";
     process.env.POLL_INTERVAL_MS = "60000";
     process.env.MIN_LEND_AMOUNT = "5000000";
-    process.env.USE_MOCK_LULO = "false";              // mainnet mode
 
     const { loadConfig } = await import("../src/config.js");
     const config = loadConfig();
@@ -95,7 +96,6 @@ describe("loadConfig", () => {
     expect(config.strategyId).toBe(3);
     expect(config.pollIntervalMs).toBe(60000);        // 60 seconds
     expect(config.minLendAmount).toBe(5000000);       // 5 USDC
-    expect(config.useMockLulo).toBe(false);
   });
 
   // Verifies fail-fast: if SOLANA_PRIVATE_KEY is missing, the agent should
@@ -125,13 +125,31 @@ describe("loadConfig", () => {
   // Verifies fail-fast: if VAULT_TOKEN_MINT is missing, PDA derivation would
   // fail silently (producing wrong addresses), so we catch it at config time.
   it("throws if VAULT_TOKEN_MINT is missing", async () => {
-    const keypair = Keypair.generate();
-    process.env.SOLANA_PRIVATE_KEY = bs58.encode(keypair.secretKey);
-    process.env.ANTHROPIC_API_KEY = "test";
+    setMinimumEnv();
     delete process.env.VAULT_TOKEN_MINT;
 
     const { loadConfig } = await import("../src/config.js");
     expect(() => loadConfig()).toThrow("VAULT_TOKEN_MINT");
+  });
+
+  // Verifies fail-fast: if LULO_PROGRAM_ID is missing, the agent can't know
+  // which protocol to target in execute_strategy_action calls.
+  it("throws if LULO_PROGRAM_ID is missing", async () => {
+    setMinimumEnv();
+    delete process.env.LULO_PROGRAM_ID;
+
+    const { loadConfig } = await import("../src/config.js");
+    expect(() => loadConfig()).toThrow("LULO_PROGRAM_ID");
+  });
+
+  // Verifies fail-fast: if LULO_TREASURY is missing, the agent can't build
+  // the remaining_accounts for deposit/withdraw CPI calls.
+  it("throws if LULO_TREASURY is missing", async () => {
+    setMinimumEnv();
+    delete process.env.LULO_TREASURY;
+
+    const { loadConfig } = await import("../src/config.js");
+    expect(() => loadConfig()).toThrow("LULO_TREASURY");
   });
 
   // Verifies that the returned config object is frozen (Object.freeze).
