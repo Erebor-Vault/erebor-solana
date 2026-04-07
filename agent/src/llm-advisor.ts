@@ -141,7 +141,8 @@ What should we do?`;
 // Parses Claude's raw text response into a typed AgentDecision.
 // Handles edge cases: markdown code blocks, malformed JSON, invalid amounts.
 // Always returns a valid AgentDecision — never throws.
-function parseDecision(response: string): AgentDecision {
+// Exported for testing.
+export function parseDecision(response: string): AgentDecision {
   // Strip markdown code fences (```json ... ```) that Claude sometimes adds
   const cleaned = response
     .replace(/```json?\n?/g, "")
