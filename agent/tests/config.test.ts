@@ -71,7 +71,7 @@ describe("loadConfig", () => {
 
     expect(config.vaultId).toBe(0);
     expect(config.strategyId).toBe(0);
-    expect(config.pollIntervalMs).toBe(30000);       // 30 seconds
+    expect(config.pollIntervalMs).toBe(120000);       // 2 minutes
     expect(config.minLendAmount).toBe(1000000);       // 1 USDC (6 decimals)
     expect(config.luloProgramId.toBase58()).toBe("ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE");
     expect(config.luloTreasury.toBase58()).toBe("So11111111111111111111111111111111111111112");

@@ -48,7 +48,7 @@ export function loadConfig(): AgentConfig {
     vaultTokenMint: new PublicKey(requireEnv("VAULT_TOKEN_MINT")),
     vaultId: Number(optionalEnv("VAULT_ID", "0")),
     strategyId: Number(optionalEnv("STRATEGY_ID", "0")),
-    pollIntervalMs: Number(optionalEnv("POLL_INTERVAL_MS", "30000")),
+    pollIntervalMs: Number(optionalEnv("POLL_INTERVAL_MS", "120000")),
     minLendAmount: Number(optionalEnv("MIN_LEND_AMOUNT", "1000000")), // 1 USDC
     luloProgramId: new PublicKey(requireEnv("LULO_PROGRAM_ID")),
     luloTreasury: new PublicKey(requireEnv("LULO_TREASURY")),

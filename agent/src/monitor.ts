@@ -172,7 +172,7 @@ async function pollCycle(
     shouldConsult = true;
   } else {
     state.routineCycleCount++;
-    // Every 10th routine cycle (~5 minutes at 30s intervals), re-evaluate
+    // Every 10th routine cycle (~20 minutes at 2-min intervals), re-evaluate
     // yield conditions using the cheaper Haiku model.
     if (state.routineCycleCount >= 10) {
       shouldConsult = true;
@@ -180,15 +180,20 @@ async function pollCycle(
     }
   }
 
+  // Model selection: use Sonnet only when the balance change exceeds 250 USDC
+  // (250_000_000 micro-USDC). Large allocations from the authority deserve
+  // deeper reasoning. Everything else (yield accrual, small changes, routine
+  // checks) uses Haiku — cheaper and fast enough for simple decisions.
+  const SONNET_THRESHOLD = 250_000_000; // 250 USDC in micro-USDC
+  const useSonnet = stateChanged && Math.abs(balanceDelta) >= SONNET_THRESHOLD;
+
   if (shouldConsult) {
-    // Ask Claude for a decision. Uses Sonnet for state changes (more capable),
-    // Haiku for routine checks (cheaper, faster).
     const decision = await advisor.getDecision(
       snapshot,
       state.lastSnapshot,
       yieldRate,
       lentBalance,
-      stateChanged // true = Sonnet, false = Haiku
+      useSonnet
     );
 
     if (decision.action === "LEND") {
