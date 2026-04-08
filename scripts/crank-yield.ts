@@ -1,39 +1,55 @@
 /**
- * crank-yield.ts — Simulate yield on all active strategies.
+ * crank-yield.ts — Simulate lending yield by minting tokens into the mock_lulo treasury.
  *
- * Each run mints tokens into strategy accounts (based on their yield rate)
- * and calls report_yield to update vault accounting.
+ * This script imitates what a real lending protocol does: the treasury grows
+ * over time as borrowers pay interest. The AI agent sees the surplus in the
+ * treasury, withdraws it to the strategy token account, and then the authority
+ * calls report_yield to update vault accounting.
+ *
+ * Flow:
+ *   1. Read how much each strategy has deposited into mock_lulo (treasury balance)
+ *   2. Calculate yield: treasury_balance * annual_rate / periods_per_year
+ *   3. Mint yield tokens into the mock_lulo treasury
+ *   4. Agent detects surplus → withdraws via execute_strategy_action
+ *   5. Authority calls report_yield → share price increases
  *
  * Usage:
  *   bunx ts-node scripts/crank-yield.ts                  # run once
- *   bunx ts-node scripts/crank-yield.ts --loop 30        # run every 30 seconds
+ *   bunx ts-node scripts/crank-yield.ts --loop 60        # run every 60 seconds
+ *
+ * Environment:
+ *   TOKEN_MINT=<address>   Override the token mint (default: hardcoded below)
  */
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { MyProject } from "../target/types/my_project";
+import { MockLulo } from "../target/types/mock_lulo";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { mintTo, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import BN from "bn.js";
+import { mintTo } from "@solana/spl-token";
 import * as fs from "fs";
 
 // -------------------------------------------------------------------
-// Config — update TOKEN_MINT to match your setup
+// Config
 // -------------------------------------------------------------------
 const RPC_URL = "https://api.devnet.solana.com";
-const WALLET_PATH = "./id.json";
+const WALLET_PATH = "./id.json"; // must be the token mint authority
 const TOKEN_MINT = new PublicKey(
   process.env.TOKEN_MINT || "3M2nY5QJdEpBCZ19QK4edNKSV1L8dNSEP3AMj64MqfUP"
 );
 
-// Yield rates per strategy (basis points per crank)
-// Match these to what you used in setup-devnet.ts
-const YIELD_BPS: Record<number, number> = {
-  0: 500,  // 5%
-  1: 1000, // 10%
-  2: 2000, // 20%
-};
+// Annual yield rate as a decimal. 0.05 = 5% APY.
+// Each crank applies: treasury_balance * ANNUAL_RATE / PERIODS_PER_YEAR
+const ANNUAL_RATE = 0.05;
 
+// How many times per year the crank runs.
+// If --loop 60 (every 60s): 365 * 24 * 60 = 525600 periods/year
+// If --loop 30 (every 30s): 1051200 periods/year
+// Default assumes ~every 60 seconds.
+const DEFAULT_INTERVAL_SEC = 60;
+
+// -------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------
 function loadWallet(path: string): Keypair {
   return Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(fs.readFileSync(path, "utf-8")))
@@ -50,87 +66,61 @@ async function confirmTx(connection: anchor.web3.Connection, sig: string) {
   });
 }
 
+// -------------------------------------------------------------------
+// Core: mint yield into mock_lulo treasury
+// -------------------------------------------------------------------
 async function crankOnce(
-  program: Program<MyProject>,
   connection: anchor.web3.Connection,
   walletKeypair: Keypair,
-  vaultPda: PublicKey
+  mockLuloProgram: Program<MockLulo>,
+  treasuryPda: PublicKey,
+  intervalSec: number
 ) {
-  const vault = await program.account.vaultState.fetch(vaultPda);
-  const strategyCount = vault.strategyCount.toNumber();
+  // Read current treasury balance
+  const treasuryInfo = await connection.getTokenAccountBalance(treasuryPda);
+  const treasuryBalance = Number(treasuryInfo.value.amount);
 
-  if (strategyCount === 0) {
-    console.log("  No strategies found.");
-    return;
+  if (treasuryBalance === 0) {
+    console.log("  Treasury empty — nothing to accrue yield on.");
+    return 0;
   }
 
-  let totalYield = 0;
+  // Calculate yield for this period:
+  //   yield = balance * annual_rate / (seconds_per_year / interval_seconds)
+  const secondsPerYear = 365.25 * 24 * 60 * 60;
+  const periodsPerYear = secondsPerYear / intervalSec;
+  const yieldAmount = Math.floor(treasuryBalance * ANNUAL_RATE / periodsPerYear);
 
-  for (let i = 0; i < strategyCount; i++) {
-    const [sPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("strategy"),
-        vaultPda.toBuffer(),
-        new BN(i).toArrayLike(Buffer, "le", 8),
-      ],
-      program.programId
-    );
-
-    const strategy = await program.account.strategyAllocation.fetch(sPda);
-    if (!strategy.isActive) {
-      console.log(`  Strategy #${i}: inactive, skipping`);
-      continue;
-    }
-
-    const currentBalance = strategy.allocatedAmount.toNumber();
-    const yieldBps = YIELD_BPS[i] ?? 500;
-    const yieldAmount = Math.floor((currentBalance * yieldBps) / 10_000);
-
-    if (yieldAmount <= 0) {
-      console.log(`  Strategy #${i}: no funds allocated, skipping`);
-      continue;
-    }
-
-    // Mint yield tokens into strategy token account
-    const sig = await mintTo(
-      connection,
-      walletKeypair,
-      TOKEN_MINT,
-      strategy.tokenAccount,
-      walletKeypair,
-      yieldAmount
-    );
-    await confirmTx(connection, sig);
-
-    // Report yield to vault
-    await program.methods
-      .reportYield()
-      .accountsStrict({
-        authority: walletKeypair.publicKey,
-        vaultState: vaultPda,
-        strategy: sPda,
-        strategyTokenAccount: strategy.tokenAccount,
-      })
-      .rpc();
-
-    totalYield += yieldAmount;
+  if (yieldAmount <= 0) {
     console.log(
-      `  Strategy #${i}: +${(yieldAmount / 1e6).toFixed(4)} tokens (${yieldBps / 100}% of ${(currentBalance / 1e6).toFixed(2)})`
+      `  Treasury: ${(treasuryBalance / 1e6).toFixed(2)} USDC — yield too small to mint this period.`
     );
+    return 0;
   }
 
-  // Print updated share price
-  const updatedVault = await program.account.vaultState.fetch(vaultPda);
-  const shareSupply = await connection.getTokenSupply(vault.shareMint);
-  const sharePrice =
-    updatedVault.totalDeposited.toNumber() /
-    Number(shareSupply.value.amount);
-
-  console.log(
-    `  Total yield: +${(totalYield / 1e6).toFixed(4)} | TVL: ${(updatedVault.totalDeposited.toNumber() / 1e6).toFixed(2)} | Share price: ${sharePrice.toFixed(6)}`
+  // Mint yield tokens directly into the treasury.
+  // This simulates borrowers paying interest — the treasury grows.
+  const sig = await mintTo(
+    connection,
+    walletKeypair,
+    TOKEN_MINT,
+    treasuryPda,
+    walletKeypair, // must be mint authority
+    yieldAmount
   );
+  await confirmTx(connection, sig);
+
+  const newBalance = treasuryBalance + yieldAmount;
+  console.log(
+    `  Treasury: ${(treasuryBalance / 1e6).toFixed(4)} → ${(newBalance / 1e6).toFixed(4)} USDC (+${(yieldAmount / 1e6).toFixed(4)} yield)`
+  );
+
+  return yieldAmount;
 }
 
+// -------------------------------------------------------------------
+// Main
+// -------------------------------------------------------------------
 async function main() {
   const connection = new anchor.web3.Connection(RPC_URL, "confirmed");
   const walletKeypair = loadWallet(WALLET_PATH);
@@ -140,36 +130,59 @@ async function main() {
   });
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.myProject as Program<MyProject>;
+  const mockLuloProgram = anchor.workspace.mockLulo as Program<MockLulo>;
 
-  const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
-    program.programId
+  // Derive the mock_lulo treasury PDA for this token mint.
+  // Seeds: ["treasury", token_mint] — matches mock_lulo program.
+  const [treasuryPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("treasury"), TOKEN_MINT.toBuffer()],
+    mockLuloProgram.programId
   );
+
+  // Check treasury exists
+  const treasuryInfo = await connection.getAccountInfo(treasuryPda);
+  if (!treasuryInfo) {
+    console.error(
+      `Treasury not found at ${treasuryPda.toBase58()}.\n` +
+      `Run create-strategies.ts first to initialize the mock_lulo treasury.`
+    );
+    process.exit(1);
+  }
 
   // Parse --loop flag
   const loopArg = process.argv.indexOf("--loop");
   const intervalSec =
-    loopArg !== -1 ? parseInt(process.argv[loopArg + 1]) || 30 : 0;
+    loopArg !== -1 ? parseInt(process.argv[loopArg + 1]) || DEFAULT_INTERVAL_SEC : DEFAULT_INTERVAL_SEC;
 
-  if (intervalSec > 0) {
-    console.log(
-      `Cranking yield every ${intervalSec}s for vault ${vaultPda.toBase58()}\n`
-    );
+  const periodsPerYear = (365.25 * 24 * 60 * 60) / intervalSec;
+  const perPeriodRate = ANNUAL_RATE / periodsPerYear;
+
+  console.log(`\n=== Mock Lulo Yield Crank ===\n`);
+  console.log(`Treasury:     ${treasuryPda.toBase58()}`);
+  console.log(`Token Mint:   ${TOKEN_MINT.toBase58()}`);
+  console.log(`Annual Rate:  ${(ANNUAL_RATE * 100).toFixed(1)}%`);
+  console.log(`Interval:     ${intervalSec}s`);
+  console.log(`Per-period:   ${(perPeriodRate * 100).toFixed(6)}%\n`);
+
+  if (loopArg !== -1) {
+    console.log(`Cranking every ${intervalSec}s. Press Ctrl+C to stop.\n`);
+
     const run = async () => {
       const now = new Date().toLocaleTimeString();
-      console.log(`[${now}] Cranking...`);
+      console.log(`[${now}]`);
       try {
-        await crankOnce(program, connection, walletKeypair, vaultPda);
+        await crankOnce(connection, walletKeypair, mockLuloProgram, treasuryPda, intervalSec);
       } catch (err: any) {
         console.error(`  Error: ${err.message}`);
       }
     };
+
     await run();
     setInterval(run, intervalSec * 1000);
   } else {
-    console.log(`Cranking yield once for vault ${vaultPda.toBase58()}\n`);
-    await crankOnce(program, connection, walletKeypair, vaultPda);
+    console.log(`Running single crank...\n`);
+    await crankOnce(connection, walletKeypair, mockLuloProgram, treasuryPda, intervalSec);
+    console.log(`\nDone. Run with --loop ${intervalSec} for continuous yield simulation.`);
   }
 }
 

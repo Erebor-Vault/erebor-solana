@@ -34,7 +34,7 @@ import { createHash } from "crypto";
 
 function anchorDiscriminator(name: string): number[] {
   const hash = createHash("sha256").update(`global:${name}`).digest();
-  return Array.from(hash.slice(0, 8));
+  return Array.from(hash.subarray(0, 8));
 }
 
 // Pre-compute discriminators for mock_lulo (and real Lulo if using same names)
@@ -80,17 +80,25 @@ export class OnChainLuloProtocol implements LuloProtocol {
     this.tokenMint = tokenMint;
   }
 
-  // Returns the current lending yield as a decimal (0.05 = 5%).
-  // For mock_lulo: returns a simulated ~5% APY.
-  // For real Lulo: would fetch from Lulo's API.
+  // Tracks how much the agent has deposited into the protocol (principal only).
+  // Used to calculate yield = treasury_balance - deposited_principal.
+  private depositedPrincipal: number = 0;
+
+  // Returns the current observed yield rate as a decimal.
+  // Calculated from actual treasury surplus: (treasury - principal) / principal.
+  // Falls back to 5% estimate if no principal has been deposited yet.
   async getCurrentYield(): Promise<number> {
-    // TODO: For real Lulo, fetch from https://api.flexlend.fi/v1/rates?token=USDC
-    // For mock_lulo, return simulated yield with slight randomization.
-    return 0.05 + (Math.random() - 0.5) * 0.01;
+    if (this.depositedPrincipal <= 0) return 0.05;
+    const treasuryBalance = await this.getLentBalance();
+    const surplus = treasuryBalance - this.depositedPrincipal;
+    if (surplus <= 0) return 0;
+    // Annualize: assume surplus accrued over ~1 poll interval.
+    // This is a rough estimate — the LLM uses it directionally, not precisely.
+    return surplus / this.depositedPrincipal;
   }
 
-  // Returns the amount of tokens currently deposited in the protocol.
-  // Reads the treasury account balance directly from the blockchain.
+  // Returns the total amount held in the protocol treasury (principal + yield).
+  // Reads the treasury token account balance directly from the blockchain.
   async getLentBalance(): Promise<number> {
     try {
       return await fetchTokenBalance(this.connection, this.treasuryPda);
@@ -164,6 +172,13 @@ export class OnChainLuloProtocol implements LuloProtocol {
       this.config.maxRetries,
       this.config.retryDelayMs
     );
+
+    // Track principal for yield calculation
+    if (isDeposit) {
+      this.depositedPrincipal += decision.amount;
+    } else {
+      this.depositedPrincipal = Math.max(0, this.depositedPrincipal - decision.amount);
+    }
 
     console.log(
       `  [PROTOCOL] ${decision.action} ${(decision.amount / 1e6).toFixed(2)} USDC — tx: ${sig}`
