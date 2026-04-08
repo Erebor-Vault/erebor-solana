@@ -154,7 +154,11 @@ async function pollCycle(
 
   const isFirstRun = state.lastBalance === -1;
   const totalDelta = isFirstRun ? 0 : totalAssets - state.lastBalance;
-  const stateChanged = isFirstRun || totalDelta !== 0;
+  // Only consider it a "state change" if the delta exceeds 0.1% of total assets
+  // or 10000 micro-USDC (0.01 USDC), whichever is larger. This prevents dust
+  // amounts from the yield crank triggering unnecessary LLM consultations.
+  const MIN_DELTA_THRESHOLD = Math.max(totalAssets * 0.001, 10_000);
+  const stateChanged = isFirstRun || Math.abs(totalDelta) >= MIN_DELTA_THRESHOLD;
 
   const yieldDisplay = yieldInfo.hasAccrued
     ? `${(yieldInfo.rate * 100).toFixed(2)}%`

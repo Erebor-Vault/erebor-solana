@@ -69,6 +69,11 @@ async function confirmTx(connection: anchor.web3.Connection, sig: string) {
 // -------------------------------------------------------------------
 // Core: mint yield into mock_lulo treasury
 // -------------------------------------------------------------------
+// Fractional yield accumulator — carries over sub-micro-USDC amounts between cranks.
+// Without this, small balances (< ~200 USDC at 60s intervals) never generate any yield
+// because Math.floor rounds the per-period amount to 0.
+let accumulatedYield = 0;
+
 async function crankOnce(
   connection: anchor.web3.Connection,
   walletKeypair: Keypair,
@@ -85,18 +90,25 @@ async function crankOnce(
     return 0;
   }
 
-  // Calculate yield for this period:
+  // Calculate yield for this period (as a float, not floored yet):
   //   yield = balance * annual_rate / (seconds_per_year / interval_seconds)
   const secondsPerYear = 365.25 * 24 * 60 * 60;
   const periodsPerYear = secondsPerYear / intervalSec;
-  const yieldAmount = Math.floor(treasuryBalance * ANNUAL_RATE / periodsPerYear);
+  const rawYield = treasuryBalance * ANNUAL_RATE / periodsPerYear;
+
+  // Add to accumulator. Only mint when we have at least 1 micro-USDC.
+  accumulatedYield += rawYield;
+  const yieldAmount = Math.floor(accumulatedYield);
 
   if (yieldAmount <= 0) {
     console.log(
-      `  Treasury: ${(treasuryBalance / 1e6).toFixed(2)} USDC — yield too small to mint this period.`
+      `  Treasury: ${(treasuryBalance / 1e6).toFixed(2)} USDC — accumulating yield (${accumulatedYield.toFixed(4)} micro-USDC buffered)`
     );
     return 0;
   }
+
+  // Subtract minted amount from accumulator, keep the fractional remainder
+  accumulatedYield -= yieldAmount;
 
   // Mint yield tokens directly into the treasury.
   // This simulates borrowers paying interest — the treasury grows.

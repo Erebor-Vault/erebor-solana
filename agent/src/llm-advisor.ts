@@ -50,11 +50,15 @@ export class LLMAdvisor {
     this.lastCallTime = now;
 
     // Calculate derived metrics for the prompt.
-    // idleBalance = tokens sitting in the strategy token account, not yet lent.
-    // delta = balance change since last cycle (positive = new funds allocated).
-    const idleBalance = snapshot.tokenBalance - lentBalance;
+    // idleBalance = tokens in the strategy token account (not lent). This IS the
+    // strategy balance — lent tokens are in the treasury, not here.
+    // delta = change in total assets since last cycle.
+    const idleBalance = snapshot.tokenBalance;
+    const totalAssetsPrev = previousSnapshot
+      ? previousSnapshot.tokenBalance
+      : 0;
     const delta = previousSnapshot
-      ? snapshot.tokenBalance - previousSnapshot.tokenBalance
+      ? (snapshot.tokenBalance + lentBalance) - totalAssetsPrev
       : 0;
 
     // Select the Claude model based on whether a state change was detected.
@@ -79,15 +83,16 @@ Context:
 - You CANNOT move tokens outside the strategy — the vault program enforces this
 
 Decision rules:
-1. If idle balance >= minimum lend amount AND no funds are currently lent, consider LEND
-2. If yield_status is "awaiting" it means funds were JUST deposited and yield hasn't had time to accrue yet — this is NORMAL, do NOT withdraw. HOLD and wait for yield to appear.
-3. If yield_status is "accruing" with a positive rate, the protocol is working — HOLD or LEND more if idle funds are available
-4. If yield_status is "none" and funds have been lent for many cycles with no yield, consider WITHDRAW
-5. If balance decreased (authority deallocated), do NOT try to lend more than available
-6. Always leave a small buffer (~5% of total assets) idle for withdrawal liquidity
-7. Never lend more than the idle balance
-8. Round amounts to whole USDC (multiples of 1000000 in micro-USDC)
-9. Once funds are lent and yield_status is "awaiting", prefer HOLD — do not repeatedly lend and withdraw
+1. If idle balance >= minimum lend amount, you SHOULD LEND the excess. Calculate: lend_amount = idle - (total_assets * 0.05). This keeps 5% of total assets as buffer. Do not overthink — any amount above minimum is worth lending.
+2. If yield_status is "awaiting" it means yield hasn't had time to accrue yet — this is NORMAL. Do NOT withdraw. But you CAN still lend additional idle funds if rule 1 applies.
+3. If yield_status is "accruing" with a positive rate, the protocol is working — HOLD or LEND more if idle funds exceed the minimum.
+4. If yield_status is "none" and funds have been lent for many cycles with no yield, consider WITHDRAW.
+5. If total assets decreased (authority deallocated), do NOT try to lend more than available.
+6. Always leave ~5% of total assets idle as withdrawal liquidity buffer.
+7. Never lend more than the idle balance.
+8. Round amounts to whole USDC (multiples of 1000000 in micro-USDC).
+9. Once funds are lent and yield_status is "awaiting", prefer HOLD — do not repeatedly lend and withdraw.
+10. There is NO minimum vault size requirement. If idle >= minimum lend amount, LEND.
 
 Respond with EXACTLY one JSON object. No other text:
 {"action": "LEND", "amount": <micro_usdc>, "reason": "<brief>"}
