@@ -35,3 +35,13 @@ Cargo.lock
 .env
 
 *.lock
+
+# Keypairs (secrets)
+*_keypair.json
+*-keypair.json
+
+# Test results
+test-results/
+
+# Images
+*.png

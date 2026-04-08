@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 export const PROGRAM_ID = new PublicKey(
-  "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+  "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw",
 );
 
 export const CLUSTERS = {
@@ -49,45 +49,45 @@ export interface VaultEntry {
 
 export const VAULT_REGISTRY: VaultEntry[] = [
   {
-    name: "AT trader agent",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    name: "Lulo agent",
+    tokenMint: new PublicKey("GiAyBPVz4vaEowMGuAuM8HzmPyBg86iruTJdNinX6njg"),
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 0,
   },
-  {
-    name: "Conservative",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
-    tokenSymbol: "USDC",
-    tokenDecimals: 6,
-    vaultId: 1,
-  },
-  {
-    name: "Aggressive Vault",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
-    tokenSymbol: "USDC",
-    tokenDecimals: 6,
-    vaultId: 2,
-  },
-  {
-    name: "Stablecoin Yield",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
-    tokenSymbol: "USDC",
-    tokenDecimals: 6,
-    vaultId: 3,
-  },
-  {
-    name: "DeFi Alpha",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
-    tokenSymbol: "USDC",
-    tokenDecimals: 6,
-    vaultId: 4,
-  },
+  // {
+  //   name: "Conservative",
+  //   tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+  //   tokenSymbol: "USDC",
+  //   tokenDecimals: 6,
+  //   vaultId: 1,
+  // },
+  // {
+  //   name: "Aggressive Vault",
+  //   tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+  //   tokenSymbol: "USDC",
+  //   tokenDecimals: 6,
+  //   vaultId: 2,
+  // },
+  // {
+  //   name: "Stablecoin Yield",
+  //   tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+  //   tokenSymbol: "USDC",
+  //   tokenDecimals: 6,
+  //   vaultId: 3,
+  // },
+  // {
+  //   name: "DeFi Alpha",
+  //   tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+  //   tokenSymbol: "USDC",
+  //   tokenDecimals: 6,
+  //   vaultId: 4,
+  // },
 ];
 
 export function getExplorerUrl(
   address: string,
-  type: "address" | "tx" = "address"
+  type: "address" | "tx" = "address",
 ): string {
   const cluster = getCluster();
   const clusterParam = cluster === "mainnet-beta" ? "" : `?cluster=${cluster}`;

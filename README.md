@@ -10,7 +10,7 @@ Think of it as an ERC-4626-style vault designed specifically for AI agent strate
 
 **Live app:** https://ereborvault.netlify.app/
 
-**Explorer:** [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet)
+**Explorer:** [View on Solana Explorer](https://explorer.solana.com/address/6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw?cluster=devnet)
 
 ## The problem
 
@@ -248,11 +248,11 @@ bun run start
 
 | | |
 |---|---|
-| Program ID (devnet) | `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` |
+| Program ID (devnet) | `6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw` |
 | Upgrade Authority | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn` |
 | Cluster | devnet |
 | Frontend | https://ereborvault.netlify.app/ |
-| Explorer | [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet) |
+| Explorer | [View on Solana Explorer](https://explorer.solana.com/address/6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw?cluster=devnet) |
 
 ## Roadmap
 

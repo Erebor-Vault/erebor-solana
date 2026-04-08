@@ -129,8 +129,13 @@ export interface AgentConfig {
 // Abstraction over the lending protocol (Lulo). Two implementations:
 // - MockLuloProtocol: tracks lent amount in memory, no on-chain interaction (devnet)
 // - RealLuloProtocol: builds CPI instructions and calls execute_strategy_action (mainnet)
+export interface YieldInfo {
+  rate: number;         // observed surplus / principal (0 if no surplus yet)
+  hasAccrued: boolean;  // true if actual yield detected in treasury, false if just deposited
+}
+
 export interface LuloProtocol {
-  getCurrentYield(): Promise<number>;         // current APY as decimal (0.05 = 5%)
+  getCurrentYield(): Promise<YieldInfo>;      // observed yield + whether it has accrued
   getLentBalance(): Promise<number>;          // micro-USDC currently lent to protocol
   execute(decision: AgentDecision): Promise<string>;  // execute action, return tx sig
 }

@@ -143,29 +143,35 @@ async function pollCycle(
     return;
   }
 
-  // ── Step 3: Detect state changes ──────────────────────────────────────────
-  // Compare current balance to previous cycle. A balance change means:
-  // - The authority allocated more funds (positive delta)
-  // - The authority deallocated funds (negative delta)
-  // - Yield was reported (positive delta, smaller magnitude)
-  const isFirstRun = state.lastBalance === -1;
-  const balanceDelta = isFirstRun ? 0 : tokenBalance - state.lastBalance;
-  const stateChanged = isFirstRun || balanceDelta !== 0;
-
-  // Fetch current yield and lent balance from the protocol adapter.
-  const yieldRate = await protocol.getCurrentYield();
+  // ── Step 3: Detect EXTERNAL state changes ──────────────────────────────────
+  // Track total assets (strategy balance + lent balance) instead of just strategy
+  // balance. This way the agent's own lend/withdraw actions don't count as
+  // "state changes" — only external events do (authority allocate/deallocate,
+  // yield accrual in the treasury).
+  const yieldInfo = await protocol.getCurrentYield();
   const lentBalance = await protocol.getLentBalance();
+  const totalAssets = tokenBalance + lentBalance;
+
+  const isFirstRun = state.lastBalance === -1;
+  const totalDelta = isFirstRun ? 0 : totalAssets - state.lastBalance;
+  const stateChanged = isFirstRun || totalDelta !== 0;
+
+  const yieldDisplay = yieldInfo.hasAccrued
+    ? `${(yieldInfo.rate * 100).toFixed(2)}%`
+    : lentBalance > 0 ? "awaiting" : "n/a";
 
   console.log(
-    `  Balance: ${(tokenBalance / 1e6).toFixed(2)} USDC | Lent: ${(lentBalance / 1e6).toFixed(2)} USDC | Yield: ${(yieldRate * 100).toFixed(2)}% APY${
-      balanceDelta !== 0 ? ` | Delta: ${balanceDelta >= 0 ? "+" : ""}${(balanceDelta / 1e6).toFixed(2)}` : ""
+    `  Balance: ${(tokenBalance / 1e6).toFixed(2)} USDC | Lent: ${(lentBalance / 1e6).toFixed(2)} USDC | Total: ${(totalAssets / 1e6).toFixed(2)} USDC | Yield: ${yieldDisplay}${
+      totalDelta !== 0 ? ` | Delta: ${totalDelta >= 0 ? "+" : ""}${(totalDelta / 1e6).toFixed(2)}` : ""
     }`
   );
 
   // ── Step 4: LLM Decision ──────────────────────────────────────────────────
   // Only consult the LLM when something meaningful happened:
-  // - State changed: new funds, balance delta, first run
+  // - External state changed: authority allocated/deallocated, yield accrued
   // - Routine re-evaluation: every 10th cycle with no changes (re-check yield)
+  // The agent's own actions (lend/withdraw) do NOT trigger re-consultation
+  // because totalAssets stays the same — only the split between idle and lent changes.
   let shouldConsult = false;
 
   if (stateChanged) {
@@ -185,13 +191,13 @@ async function pollCycle(
   // deeper reasoning. Everything else (yield accrual, small changes, routine
   // checks) uses Haiku — cheaper and fast enough for simple decisions.
   const SONNET_THRESHOLD = 250_000_000; // 250 USDC in micro-USDC
-  const useSonnet = stateChanged && Math.abs(balanceDelta) >= SONNET_THRESHOLD;
+  const useSonnet = stateChanged && Math.abs(totalDelta) >= SONNET_THRESHOLD;
 
   if (shouldConsult) {
     const decision = await advisor.getDecision(
       snapshot,
       state.lastSnapshot,
-      yieldRate,
+      yieldInfo,
       lentBalance,
       useSonnet
     );
@@ -223,7 +229,9 @@ async function pollCycle(
   }
 
   // ── Step 5: Update tracking state ─────────────────────────────────────────
-  state.lastBalance = tokenBalance;
+  // Track total assets (idle + lent) so the agent's own actions don't
+  // appear as state changes on the next cycle.
+  state.lastBalance = totalAssets;
   state.lastSnapshot = snapshot;
 }
 

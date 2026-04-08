@@ -6,15 +6,15 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
+my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
 
 [programs.localnet]
-my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
+my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
 
 [programs.mainnet]
-my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
 
 [registry]
 url = "https://api.apr.dev"

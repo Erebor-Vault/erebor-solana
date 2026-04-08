@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/my_project.json`.
  */
 export type MyProject = {
-  "address": "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B",
+  "address": "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw",
   "metadata": {
     "name": "myProject",
     "version": "0.1.0",
@@ -1947,6 +1947,11 @@ export type MyProject = {
       "code": 6013,
       "name": "invalidInstructionData",
       "msg": "Instruction data too short or invalid"
+    },
+    {
+      "code": 6014,
+      "name": "unauthorizedDestination",
+      "msg": "Writable token account belongs to caller — funds must flow to vault-owned accounts"
     }
   ],
   "types": [

@@ -12,7 +12,7 @@
 // defaults to HOLD (do nothing). This prevents bad trades from LLM errors.
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { AgentConfig, AgentDecision, StrategySnapshot } from "./types.js";
+import type { AgentConfig, AgentDecision, StrategySnapshot, YieldInfo } from "./types.js";
 
 export class LLMAdvisor {
   private client: Anthropic;
@@ -38,7 +38,7 @@ export class LLMAdvisor {
   async getDecision(
     snapshot: StrategySnapshot,
     previousSnapshot: StrategySnapshot | null,
-    yieldRate: number,
+    yieldInfo: YieldInfo,
     lentBalance: number,
     useSmartModel: boolean
   ): Promise<AgentDecision> {
@@ -79,12 +79,15 @@ Context:
 - You CANNOT move tokens outside the strategy — the vault program enforces this
 
 Decision rules:
-1. If idle balance >= minimum lend amount AND yield is positive, consider LEND
-2. If yield has dropped below 1% APY, consider WITHDRAW to preserve capital
-3. If balance decreased (authority deallocated), do NOT try to lend more than available
-4. Always leave a small buffer (~5% of total) idle for withdrawal liquidity
-5. Never lend more than the idle balance
-6. Round amounts to whole USDC (multiples of 1000000 in micro-USDC)
+1. If idle balance >= minimum lend amount AND no funds are currently lent, consider LEND
+2. If yield_status is "awaiting" it means funds were JUST deposited and yield hasn't had time to accrue yet — this is NORMAL, do NOT withdraw. HOLD and wait for yield to appear.
+3. If yield_status is "accruing" with a positive rate, the protocol is working — HOLD or LEND more if idle funds are available
+4. If yield_status is "none" and funds have been lent for many cycles with no yield, consider WITHDRAW
+5. If balance decreased (authority deallocated), do NOT try to lend more than available
+6. Always leave a small buffer (~5% of total assets) idle for withdrawal liquidity
+7. Never lend more than the idle balance
+8. Round amounts to whole USDC (multiples of 1000000 in micro-USDC)
+9. Once funds are lent and yield_status is "awaiting", prefer HOLD — do not repeatedly lend and withdraw
 
 Respond with EXACTLY one JSON object. No other text:
 {"action": "LEND", "amount": <micro_usdc>, "reason": "<brief>"}
@@ -93,14 +96,23 @@ Respond with EXACTLY one JSON object. No other text:
 
     // User message: provides the real-time numerical data.
     // Amounts shown in both micro-USDC (for machine precision) and USDC (for readability).
+    // Yield status tells the LLM whether yield has actually been observed:
+    // - "accruing": real yield detected in treasury (rate > 0)
+    // - "awaiting": funds are lent but no yield yet (just deposited, crank hasn't run)
+    // - "none": nothing is lent
+    const yieldStatus = lentBalance > 0
+      ? (yieldInfo.hasAccrued ? "accruing" : "awaiting")
+      : "none";
+    const totalAssets = snapshot.tokenBalance + lentBalance;
+
     const userMessage = `Current state:
 - Strategy token balance: ${snapshot.tokenBalance} micro-USDC (${(snapshot.tokenBalance / 1e6).toFixed(2)} USDC)
 - Currently lent to Lulo: ${lentBalance} micro-USDC (${(lentBalance / 1e6).toFixed(2)} USDC)
 - Idle (available to lend): ${idleBalance} micro-USDC (${(idleBalance / 1e6).toFixed(2)} USDC)
-- Current Lulo yield APY: ${(yieldRate * 100).toFixed(2)}%
+- Total assets (lent + idle): ${totalAssets} micro-USDC (${(totalAssets / 1e6).toFixed(2)} USDC)
+- Yield status: ${yieldStatus}${yieldInfo.hasAccrued ? ` (observed rate: ${(yieldInfo.rate * 100).toFixed(4)}%)` : ""}
 - Minimum lend amount: ${this.config.minLendAmount} micro-USDC
 - Balance change since last check: ${delta >= 0 ? "+" : ""}${delta} micro-USDC
-- Total assets (lent + idle): ${snapshot.tokenBalance} micro-USDC
 
 What should we do?`;
 

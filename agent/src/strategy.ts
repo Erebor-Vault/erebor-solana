@@ -84,17 +84,19 @@ export class OnChainLuloProtocol implements LuloProtocol {
   // Used to calculate yield = treasury_balance - deposited_principal.
   private depositedPrincipal: number = 0;
 
-  // Returns the current observed yield rate as a decimal.
-  // Calculated from actual treasury surplus: (treasury - principal) / principal.
-  // Falls back to 5% estimate if no principal has been deposited yet.
-  async getCurrentYield(): Promise<number> {
-    if (this.depositedPrincipal <= 0) return 0.05;
+  // Returns the current observed yield as { rate, hasAccrued }.
+  // - rate: surplus / principal (0 if no surplus yet)
+  // - hasAccrued: true if actual yield has been observed in the treasury
+  // This distinction lets the LLM differentiate between "no yield yet" (just
+  // deposited, crank hasn't run) and "yield is actually 0" (protocol broken).
+  async getCurrentYield(): Promise<{ rate: number; hasAccrued: boolean }> {
+    if (this.depositedPrincipal <= 0) return { rate: 0, hasAccrued: false };
     const treasuryBalance = await this.getLentBalance();
     const surplus = treasuryBalance - this.depositedPrincipal;
-    if (surplus <= 0) return 0;
-    // Annualize: assume surplus accrued over ~1 poll interval.
-    // This is a rough estimate — the LLM uses it directionally, not precisely.
-    return surplus / this.depositedPrincipal;
+    if (surplus > 0) {
+      return { rate: surplus / this.depositedPrincipal, hasAccrued: true };
+    }
+    return { rate: 0, hasAccrued: false };
   }
 
   // Returns the total amount held in the protocol treasury (principal + yield).
