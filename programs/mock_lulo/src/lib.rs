@@ -1,21 +1,23 @@
 // mock_lulo — A minimal mock lending protocol for devnet testing.
 //
 // Simulates a lending protocol (like Lulo/FlexLend) that the Erebor vault's
-// AI agent can interact with via execute_strategy_action. This program exists
-// so the full CPI flow can be tested end-to-end on devnet:
+// AI agent can interact with via execute_strategy_action.
 //
-//   Agent signs tx → Vault validates whitelist → Vault CPIs to mock_lulo → tokens move
+// Three instruction types:
+//   initialize_treasury — creates the shared token treasury PDA per mint
+//   initialize_position — creates a per-strategy position tracker
+//   deposit(amount)     — moves tokens into treasury, tracks position
+//   withdraw(amount)    — moves tokens out of treasury, updates position
 //
-// Two instructions:
-//   deposit(amount)  — transfers tokens FROM strategy token account TO mock treasury
-//   withdraw(amount) — transfers tokens FROM mock treasury BACK TO strategy token account
+// Position tracking (ERC-4626 totalAssets parity):
+//   Each strategy gets a ProtocolPosition PDA that records how much it has
+//   deposited. The vault program reads this during report_yield to compute
+//   total_strategy_value = idle_balance + Σ(protocol_positions).
+//   This matches ERC-4626's totalAssets() which includes external positions.
 //
-// The vault PDA is the authority on the strategy token account and signs the
-// CPI via invoke_signed. For withdraw, the mock_lulo treasury PDA signs the
-// reverse transfer via its own invoke_signed.
-//
-// Treasury PDA seeds: ["treasury", token_mint]
-// This gives each token mint its own treasury account.
+// PDA seeds:
+//   Treasury:  ["treasury", token_mint]
+//   Position:  ["position", strategy_token_account]
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
@@ -26,9 +28,7 @@ declare_id!("ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE");
 pub mod mock_lulo {
     use super::*;
 
-    // Initialize the mock treasury for a given token mint.
-    // Must be called once before deposit/withdraw can work.
-    // Creates a PDA-owned token account that holds "lent" tokens.
+    // Initialize the shared treasury for a given token mint.
     pub fn initialize_treasury(ctx: Context<InitializeTreasury>) -> Result<()> {
         msg!(
             "Mock Lulo treasury initialized for mint {:?}",
@@ -37,15 +37,25 @@ pub mod mock_lulo {
         Ok(())
     }
 
-    // Deposit: move tokens from strategy token account → mock treasury.
-    // The vault PDA must sign this transaction (it's the authority on the
-    // strategy token account). This happens automatically because the vault
-    // program calls invoke_signed when routing through execute_strategy_action.
+    // Initialize a per-strategy position tracker.
+    // Must be called once per strategy before deposit/withdraw.
+    pub fn initialize_position(ctx: Context<InitializePosition>) -> Result<()> {
+        let position = &mut ctx.accounts.position;
+        position.strategy_token_account = ctx.accounts.strategy_token_account.key();
+        position.deposited_amount = 0;
+        position.bump = ctx.bumps.position;
+        msg!(
+            "Position initialized for strategy token account {:?}",
+            position.strategy_token_account
+        );
+        Ok(())
+    }
+
+    // Deposit: move tokens from strategy token account → treasury.
+    // Updates the position to track the deposited principal.
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         require!(amount > 0, MockLuloError::ZeroAmount);
 
-        // Transfer tokens: strategy_token_account → treasury
-        // Authority: vault PDA (passed as signer by the vault's invoke_signed)
         let cpi_accounts = Transfer {
             from: ctx.accounts.strategy_token_account.to_account_info(),
             to: ctx.accounts.treasury.to_account_info(),
@@ -57,13 +67,20 @@ pub mod mock_lulo {
         );
         token::transfer(cpi_ctx, amount)?;
 
+        // Track deposited principal in the position account
+        ctx.accounts.position.deposited_amount = ctx
+            .accounts
+            .position
+            .deposited_amount
+            .checked_add(amount)
+            .ok_or(MockLuloError::Overflow)?;
+
         msg!("Mock Lulo: deposited {} tokens", amount);
         Ok(())
     }
 
-    // Withdraw: move tokens from mock treasury → strategy token account.
-    // The treasury PDA is owned by the mock_lulo program, so mock_lulo
-    // signs the transfer with its own PDA seeds.
+    // Withdraw: move tokens from treasury → strategy token account.
+    // Updates the position to reflect the withdrawal.
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         require!(amount > 0, MockLuloError::ZeroAmount);
         require!(
@@ -71,8 +88,6 @@ pub mod mock_lulo {
             MockLuloError::InsufficientTreasury
         );
 
-        // Transfer tokens: treasury → strategy_token_account
-        // Authority: treasury PDA (mock_lulo program signs via invoke_signed)
         let mint_key = ctx.accounts.mint.key();
         let signer_seeds: &[&[&[u8]]] = &[&[
             b"treasury",
@@ -83,7 +98,7 @@ pub mod mock_lulo {
         let cpi_accounts = Transfer {
             from: ctx.accounts.treasury.to_account_info(),
             to: ctx.accounts.strategy_token_account.to_account_info(),
-            authority: ctx.accounts.treasury.to_account_info(), // treasury PDA is its own authority
+            authority: ctx.accounts.treasury.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -92,12 +107,22 @@ pub mod mock_lulo {
         );
         token::transfer(cpi_ctx, amount)?;
 
+        // Update position — clamp to zero if withdrawing more than deposited
+        // (can happen when withdrawing accrued yield)
+        ctx.accounts.position.deposited_amount = ctx
+            .accounts
+            .position
+            .deposited_amount
+            .saturating_sub(amount);
+
         msg!("Mock Lulo: withdrew {} tokens", amount);
         Ok(())
     }
 }
 
-// --- Account structs ---
+// =============================================================================
+// ACCOUNTS
+// =============================================================================
 
 #[derive(Accounts)]
 pub struct InitializeTreasury<'info> {
@@ -106,15 +131,13 @@ pub struct InitializeTreasury<'info> {
 
     pub mint: Account<'info, Mint>,
 
-    // Treasury token account PDA — owned by this program.
-    // Seeds: ["treasury", mint] so each token gets its own treasury.
     #[account(
         init,
         payer = payer,
         seeds = [b"treasury", mint.key().as_ref()],
         bump,
         token::mint = mint,
-        token::authority = treasury, // self-referential: treasury PDA is its own authority
+        token::authority = treasury,
     )]
     pub treasury: Account<'info, TokenAccount>,
 
@@ -123,12 +146,30 @@ pub struct InitializeTreasury<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitializePosition<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: The strategy token account this position tracks.
+    pub strategy_token_account: UncheckedAccount<'info>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + ProtocolPosition::INIT_SPACE,
+        seeds = [b"position", strategy_token_account.key().as_ref()],
+        bump,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct Deposit<'info> {
-    // Strategy's token account — vault PDA is authority (signs via invoke_signed).
     #[account(mut)]
     pub strategy_token_account: Account<'info, TokenAccount>,
 
-    // Mock treasury — receives deposited tokens.
     #[account(
         mut,
         seeds = [b"treasury", mint.key().as_ref()],
@@ -138,20 +179,26 @@ pub struct Deposit<'info> {
 
     pub mint: Account<'info, Mint>,
 
-    /// CHECK: The vault PDA that signs the transfer (authority on strategy_token_account).
-    /// Validated by the SPL Token program during the transfer CPI.
+    /// CHECK: The vault PDA that signs the transfer.
     pub vault_authority: Signer<'info>,
 
     pub token_program: Program<'info, Token>,
+
+    // Per-strategy position tracker — updated on every deposit.
+    #[account(
+        mut,
+        seeds = [b"position", strategy_token_account.key().as_ref()],
+        bump = position.bump,
+        constraint = position.strategy_token_account == strategy_token_account.key() @ MockLuloError::InvalidPosition,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
 }
 
 #[derive(Accounts)]
 pub struct Withdraw<'info> {
-    // Strategy's token account — receives withdrawn tokens.
     #[account(mut)]
     pub strategy_token_account: Account<'info, TokenAccount>,
 
-    // Mock treasury — sends tokens back. Treasury PDA signs via invoke_signed.
     #[account(
         mut,
         seeds = [b"treasury", mint.key().as_ref()],
@@ -161,14 +208,46 @@ pub struct Withdraw<'info> {
 
     pub mint: Account<'info, Mint>,
 
-    /// CHECK: The vault PDA. Not used as signer for withdraw (treasury signs instead),
-    /// but included for consistency with the deposit instruction layout.
+    /// CHECK: The vault PDA. Not used as signer for withdraw (treasury signs instead).
     pub vault_authority: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
+
+    // Per-strategy position tracker — updated on every withdraw.
+    #[account(
+        mut,
+        seeds = [b"position", strategy_token_account.key().as_ref()],
+        bump = position.bump,
+        constraint = position.strategy_token_account == strategy_token_account.key() @ MockLuloError::InvalidPosition,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
 }
 
-// --- Errors ---
+// =============================================================================
+// STATE — ProtocolPosition
+// =============================================================================
+
+/// Tracks a single strategy's deposited principal in this protocol.
+/// The vault program reads this account to compute total strategy value
+/// (ERC-4626 totalAssets equivalent: idle_balance + protocol_position).
+///
+/// Seeds: ["position", strategy_token_account]
+#[account]
+#[derive(InitSpace)]
+pub struct ProtocolPosition {
+    /// The strategy token account this position belongs to.
+    pub strategy_token_account: Pubkey, // 32 bytes
+
+    /// Principal deposited by this strategy (incremented on deposit, decremented on withdraw).
+    pub deposited_amount: u64, // 8 bytes
+
+    /// PDA bump.
+    pub bump: u8, // 1 byte
+}
+
+// =============================================================================
+// ERRORS
+// =============================================================================
 
 #[error_code]
 pub enum MockLuloError {
@@ -177,4 +256,10 @@ pub enum MockLuloError {
 
     #[msg("Treasury has insufficient tokens for withdrawal")]
     InsufficientTreasury,
+
+    #[msg("Arithmetic overflow")]
+    Overflow,
+
+    #[msg("Position does not match strategy token account")]
+    InvalidPosition,
 }

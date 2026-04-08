@@ -46,4 +46,7 @@ pub enum VaultError {
 
     #[msg("Writable token account belongs to caller — funds must flow to vault-owned accounts")]
     UnauthorizedDestination,
+
+    #[msg("Invalid protocol position account")]
+    InvalidPositionAccount,
 }

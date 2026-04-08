@@ -88,7 +88,8 @@ export function useAuthorityActions() {
   const reportYield = useCallback(
     async (
       strategyId: number,
-      strategyTokenAccount: PublicKey
+      strategyTokenAccount: PublicKey,
+      protocolPositionPdas?: PublicKey[]
     ): Promise<string> => {
       if (!program || !wallet.publicKey) throw new Error("Not ready");
 
@@ -96,15 +97,28 @@ export function useAuthorityActions() {
       try {
         const strategyPda = deriveStrategyPda(vaultPda, strategyId);
 
-        const sig = await program.methods
+        let builder = program.methods
           .reportYield()
           .accountsStrict({
             authority: wallet.publicKey,
             vaultState: vaultPda,
             strategy: strategyPda,
             strategyTokenAccount,
-          })
-          .rpc();
+          });
+
+        // Pass protocol position accounts so report_yield can read
+        // external positions (ERC-4626 totalAssets equivalent)
+        if (protocolPositionPdas?.length) {
+          builder = builder.remainingAccounts(
+            protocolPositionPdas.map((pk) => ({
+              pubkey: pk,
+              isSigner: false,
+              isWritable: false,
+            }))
+          );
+        }
+
+        const sig = await builder.rpc();
 
         await refresh();
         return sig;

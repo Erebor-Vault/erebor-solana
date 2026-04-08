@@ -48,7 +48,9 @@ pub mod my_project {
         instructions::update_strategy_delegate::handler(ctx)
     }
 
-    pub fn report_yield(ctx: Context<ReportYield>) -> Result<()> {
+    pub fn report_yield<'info>(
+        ctx: Context<'_, '_, 'info, 'info, ReportYield<'info>>,
+    ) -> Result<()> {
         instructions::report_yield::handler(ctx)
     }
 

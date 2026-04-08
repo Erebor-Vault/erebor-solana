@@ -41,7 +41,8 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
     : 0;
   const isAtTarget = strategy.allocatedAmount.toNumber() === targetAmount;
 
-  const unreportedYield = strategy.actualBalance
+  // ERC-4626 totalAssets equivalent: idle + external protocol positions
+  const unreportedYield = strategy.totalValue
     .sub(strategy.allocatedAmount)
     .toNumber();
 
@@ -129,8 +130,18 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
           </p>
         </div>
         <div>
-          <span className="text-[var(--color-text-muted)]">Actual Balance</span>
+          <span className="text-[var(--color-text-muted)]">Idle Balance</span>
           <p>{formatTokenAmount(strategy.actualBalance)} USDC</p>
+        </div>
+        {strategy.externalPosition.toNumber() > 0 && (
+          <div>
+            <span className="text-[var(--color-text-muted)]">In Protocol</span>
+            <p>{formatTokenAmount(strategy.externalPosition)} USDC</p>
+          </div>
+        )}
+        <div>
+          <span className="text-[var(--color-text-muted)]">Total Value</span>
+          <p className="font-semibold">{formatTokenAmount(strategy.totalValue)} USDC</p>
         </div>
         {unreportedYield > 0 && (
           <div>
@@ -148,7 +159,11 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
           <button
             onClick={() =>
               handleAction(() =>
-                reportYield(strategy.strategyId.toNumber(), strategy.tokenAccount)
+                reportYield(
+                  strategy.strategyId.toNumber(),
+                  strategy.tokenAccount,
+                  strategy.positionPda ? [strategy.positionPda] : undefined
+                )
               )
             }
             disabled={actionLoading}

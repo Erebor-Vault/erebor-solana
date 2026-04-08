@@ -272,6 +272,26 @@ async function main() {
     console.log(`   Treasury PDA: ${treasuryPda.toBase58()}`);
   }
 
+  // ── Step 6b: Initialize mock_lulo position for this strategy ─────────
+  const [positionPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), strategyTokenPda.toBuffer()],
+    mockLuloProgram.programId
+  );
+
+  const existingPosition = await connection.getAccountInfo(positionPda);
+  if (existingPosition) {
+    console.log(`   Position already initialized at ${positionPda.toBase58()}`);
+  } else {
+    console.log("   Initializing position tracker...");
+    await mockLuloProgram.methods.initializePosition().accountsStrict({
+      payer: payer.publicKey,
+      strategyTokenAccount: strategyTokenPda,
+      position: positionPda,
+      systemProgram: SystemProgram.programId,
+    }).rpc();
+    console.log(`   Position PDA: ${positionPda.toBase58()}`);
+  }
+
   // ── Step 7: Mint test tokens ────────────────────────────────────────────
   if (!opts.mintAddress) {
     console.log("\n7. Minting test tokens to deployer...");

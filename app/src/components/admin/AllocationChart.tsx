@@ -38,10 +38,10 @@ export function AllocationChart() {
       value: reserveBalance.toNumber(),
     },
     ...strategies
-      .filter((s) => s.allocatedAmount.toNumber() > 0)
+      .filter((s) => s.totalValue.toNumber() > 0)
       .map((s) => ({
         name: `Strategy #${s.strategyId.toString()}`,
-        value: s.allocatedAmount.toNumber(),
+        value: s.totalValue.toNumber(),
       })),
   ];
 

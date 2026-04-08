@@ -1946,6 +1946,11 @@
       "code": 6014,
       "name": "UnauthorizedDestination",
       "msg": "Writable token account belongs to caller — funds must flow to vault-owned accounts"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidPositionAccount",
+      "msg": "Invalid protocol position account"
     }
   ],
   "types": [

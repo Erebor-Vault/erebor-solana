@@ -25,6 +25,8 @@ import type { AgentConfig, AgentDecision, LuloProtocol } from "./types.js";
 import {
   findAllowedActionByDiscriminator,
   fetchTokenBalance,
+  deriveProtocolPositionPda,
+  fetchProtocolPosition,
 } from "./vault-client.js";
 
 // Anchor discriminators are the first 8 bytes of sha256("global:<instruction_name>").
@@ -80,34 +82,28 @@ export class OnChainLuloProtocol implements LuloProtocol {
     this.tokenMint = tokenMint;
   }
 
-  // Tracks how much the agent has deposited into the protocol (principal only).
-  // Used to calculate yield = treasury_balance - deposited_principal.
-  private depositedPrincipal: number = 0;
-
   // Returns the current observed yield as { rate, hasAccrued }.
-  // - rate: surplus / principal (0 if no surplus yet)
-  // - hasAccrued: true if actual yield has been observed in the treasury
-  // This distinction lets the LLM differentiate between "no yield yet" (just
-  // deposited, crank hasn't run) and "yield is actually 0" (protocol broken).
+  // Reads the on-chain ProtocolPosition to get deposited principal, then
+  // compares with the treasury balance to detect accrued yield.
   async getCurrentYield(): Promise<{ rate: number; hasAccrued: boolean }> {
-    if (this.depositedPrincipal <= 0) return { rate: 0, hasAccrued: false };
-    const treasuryBalance = await this.getLentBalance();
-    const surplus = treasuryBalance - this.depositedPrincipal;
+    const positionPda = deriveProtocolPositionPda(this.strategyTokenPda, this.luloProgramId);
+    const principal = await fetchProtocolPosition(this.connection, positionPda);
+    if (principal <= 0) return { rate: 0, hasAccrued: false };
+
+    const treasuryBalance = await fetchTokenBalance(this.connection, this.treasuryPda).catch(() => 0);
+    const surplus = treasuryBalance - principal;
     if (surplus > 0) {
-      return { rate: surplus / this.depositedPrincipal, hasAccrued: true };
+      return { rate: surplus / principal, hasAccrued: true };
     }
     return { rate: 0, hasAccrued: false };
   }
 
-  // Returns the total amount held in the protocol treasury (principal + yield).
-  // Reads the treasury token account balance directly from the blockchain.
+  // Returns this strategy's deposited amount from the on-chain ProtocolPosition.
+  // This is the principal tracked by the protocol — the vault reads the same
+  // account during report_yield to compute total strategy value.
   async getLentBalance(): Promise<number> {
-    try {
-      return await fetchTokenBalance(this.connection, this.treasuryPda);
-    } catch {
-      // Treasury might not exist yet (no deposits made)
-      return 0;
-    }
+    const positionPda = deriveProtocolPositionPda(this.strategyTokenPda, this.luloProgramId);
+    return fetchProtocolPosition(this.connection, positionPda);
   }
 
   // Executes a LEND or WITHDRAW action by calling execute_strategy_action
@@ -147,13 +143,15 @@ export class OnChainLuloProtocol implements LuloProtocol {
 
     // Build remaining_accounts — the accounts the target protocol needs.
     // These match the Deposit/Withdraw account structs in mock_lulo:
-    //   strategy_token_account, treasury, mint, vault_authority, token_program
+    //   strategy_token_account, treasury, mint, vault_authority, token_program, position
+    const positionPda = deriveProtocolPositionPda(this.strategyTokenPda, this.luloProgramId);
     const remainingAccounts = [
       { pubkey: this.strategyTokenPda, isSigner: false, isWritable: true },
       { pubkey: this.treasuryPda, isSigner: false, isWritable: true },
       { pubkey: this.tokenMint, isSigner: false, isWritable: false },
       { pubkey: this.vaultPda, isSigner: false, isWritable: false }, // vault_authority
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: positionPda, isSigner: false, isWritable: true }, // position tracker
     ];
 
     // Call execute_strategy_action with retry logic for transient errors.
@@ -175,12 +173,8 @@ export class OnChainLuloProtocol implements LuloProtocol {
       this.config.retryDelayMs
     );
 
-    // Track principal for yield calculation
-    if (isDeposit) {
-      this.depositedPrincipal += decision.amount;
-    } else {
-      this.depositedPrincipal = Math.max(0, this.depositedPrincipal - decision.amount);
-    }
+    // Principal tracking is now on-chain in the ProtocolPosition account —
+    // mock_lulo's deposit/withdraw instructions update it automatically.
 
     console.log(
       `  [PROTOCOL] ${decision.action} ${(decision.amount / 1e6).toFixed(2)} USDC — tx: ${sig}`

@@ -1952,6 +1952,11 @@ export type MyProject = {
       "code": 6014,
       "name": "unauthorizedDestination",
       "msg": "Writable token account belongs to caller — funds must flow to vault-owned accounts"
+    },
+    {
+      "code": 6015,
+      "name": "invalidPositionAccount",
+      "msg": "Invalid protocol position account"
     }
   ],
   "types": [

@@ -204,6 +204,32 @@ export async function findAllowedActionByDiscriminator(
   return null;
 }
 
+// Derives a ProtocolPosition PDA on a protocol program.
+// Seeds: ["position", strategy_token_account]
+// This is the standard interface for protocol adapters to expose per-strategy positions.
+export function deriveProtocolPositionPda(
+  strategyTokenPda: PublicKey,
+  protocolProgramId: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), strategyTokenPda.toBuffer()],
+    protocolProgramId
+  );
+  return pda;
+}
+
+// Reads the deposited_amount from a ProtocolPosition account.
+// Layout: [8-byte discriminator][32-byte strategy_token_account][8-byte deposited_amount][1-byte bump]
+export async function fetchProtocolPosition(
+  connection: Connection,
+  positionPda: PublicKey
+): Promise<number> {
+  const info = await connection.getAccountInfo(positionPda);
+  if (!info || info.data.length < 48) return 0;
+  // deposited_amount is at bytes 40..48 (after 8 discriminator + 32 pubkey)
+  return Number(info.data.readBigUInt64LE(40));
+}
+
 // Byte-level comparison of two number arrays (used for discriminator matching).
 function arraysEqual(a: number[], b: number[]): boolean {
   if (a.length !== b.length) return false;
