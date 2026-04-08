@@ -9,7 +9,7 @@
 import "dotenv/config";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import type { AgentConfig } from "./types.js";
+import type { AgentConfig } from "../../shared/types.js";
 
 // Throws if the env var is missing or empty.
 function requireEnv(name: string): string {

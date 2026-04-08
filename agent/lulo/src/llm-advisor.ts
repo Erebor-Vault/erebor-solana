@@ -12,7 +12,7 @@
 // defaults to HOLD (do nothing). This prevents bad trades from LLM errors.
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { AgentConfig, AgentDecision, StrategySnapshot, YieldInfo } from "./types.js";
+import type { AgentConfig, AgentDecision, StrategySnapshot, YieldInfo } from "../../shared/types.js";
 
 export class LLMAdvisor {
   private client: Anthropic;

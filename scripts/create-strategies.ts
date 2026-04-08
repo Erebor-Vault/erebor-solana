@@ -356,7 +356,7 @@ async function main() {
   console.log(`Treasury:       ${treasuryPda.toBase58()}`);
   console.log(`Actions:        deposit (#0), withdraw (#1)`);
 
-  console.log("\n--- Copy to agent/.env ---\n");
+  console.log("\n--- Copy to agent/lulo/.env ---\n");
   console.log(`SOLANA_PRIVATE_KEY=${agentPrivateKeyBase58}`);
   console.log(`RPC_URL=${opts.rpcUrl}`);
   console.log(`ANTHROPIC_API_KEY=<your_claude_api_key>`);

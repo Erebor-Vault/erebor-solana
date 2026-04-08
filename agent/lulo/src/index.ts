@@ -18,7 +18,7 @@
 // at startup rather than failing on the first transaction.
 
 import { Connection } from "@solana/web3.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, PROGRAM_ID } from "./config.js";
 import {
   createProgram,
   deriveVaultPda,
@@ -27,7 +27,7 @@ import {
   fetchVaultState,
   fetchStrategy,
   fetchTokenBalance,
-} from "./vault-client.js";
+} from "../../shared/vault-client.js";
 import { OnChainLuloProtocol } from "./strategy.js";
 import { LLMAdvisor } from "./llm-advisor.js";
 import { startMonitorLoop } from "./monitor.js";
@@ -60,9 +60,9 @@ async function main() {
   // ── Step 3: Derive all PDAs ───────────────────────────────────────────────
   // These are deterministic — same seeds always produce the same address.
   // Must match the seeds used by the on-chain program in state.rs.
-  const vaultPda = deriveVaultPda(config.vaultTokenMint, config.vaultId);
-  const strategyPda = deriveStrategyPda(vaultPda, config.strategyId);
-  const strategyTokenPda = deriveStrategyTokenPda(vaultPda, config.strategyId);
+  const vaultPda = deriveVaultPda(config.vaultTokenMint, config.vaultId, PROGRAM_ID);
+  const strategyPda = deriveStrategyPda(vaultPda, config.strategyId, PROGRAM_ID);
+  const strategyTokenPda = deriveStrategyTokenPda(vaultPda, config.strategyId, PROGRAM_ID);
 
   console.log(`Vault PDA:  ${vaultPda.toBase58()}`);
   console.log(`Strategy:   ${strategyPda.toBase58()}`);
@@ -123,6 +123,7 @@ async function main() {
     config.luloProgramId,
     config.luloTreasury,
     config.vaultTokenMint,
+    PROGRAM_ID,
   );
 
   // ── Step 6: Initialize LLM advisor ────────────────────────────────────────

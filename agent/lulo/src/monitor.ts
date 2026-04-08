@@ -16,15 +16,15 @@
 import { Program } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import fs from "fs";
-import type { MyProject } from "../../target/types/my_project.js";
+import type { MyProject } from "../../../target/types/my_project.js";
 import type {
   AgentConfig,
   LuloProtocol,
   MonitorState,
   StrategySnapshot,
   WithdrawSignal,
-} from "./types.js";
-import { fetchStrategy, fetchTokenBalance } from "./vault-client.js";
+} from "../../shared/types.js";
+import { fetchStrategy, fetchTokenBalance } from "../../shared/vault-client.js";
 import { LLMAdvisor } from "./llm-advisor.js";
 
 // Starts the infinite polling loop. This function never returns under normal operation.

@@ -17,7 +17,7 @@ import {
   deriveStrategyPda,
   deriveStrategyTokenPda,
   deriveAllowedActionPda,
-} from "../src/vault-client.js";
+} from "../../shared/vault-client.js";
 import { PROGRAM_ID } from "../src/config.js";
 import BN from "bn.js";
 
@@ -30,7 +30,7 @@ describe("PDA derivation", () => {
     // This is a Solana invariant: PDAs can only be used by programs, not wallets.
     // If isOnCurve returns true, the PDA derivation has a bug.
     it("produces a valid PDA on the ed25519 curve", () => {
-      const pda = deriveVaultPda(TEST_MINT, 0);
+      const pda = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
       expect(PublicKey.isOnCurve(pda.toBytes())).toBe(false);
     });
 
@@ -38,16 +38,16 @@ describe("PDA derivation", () => {
     // This is fundamental — if PDAs were non-deterministic, the agent couldn't
     // find the vault account it's supposed to manage.
     it("is deterministic — same inputs always produce the same PDA", () => {
-      const pda1 = deriveVaultPda(TEST_MINT, 0);
-      const pda2 = deriveVaultPda(TEST_MINT, 0);
+      const pda1 = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
+      const pda2 = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
       expect(pda1.equals(pda2)).toBe(true);
     });
 
     // The vault_id is part of the PDA seeds, so different IDs must produce
     // different addresses. This enables multiple vaults per token mint.
     it("different vault IDs produce different PDAs", () => {
-      const pda0 = deriveVaultPda(TEST_MINT, 0);
-      const pda1 = deriveVaultPda(TEST_MINT, 1);
+      const pda0 = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
+      const pda1 = deriveVaultPda(TEST_MINT, 1, PROGRAM_ID);
       expect(pda0.equals(pda1)).toBe(false);
     });
 
@@ -55,8 +55,8 @@ describe("PDA derivation", () => {
     // different addresses. A USDC vault and a SOL vault are completely separate.
     it("different mints produce different PDAs", () => {
       const otherMint = new PublicKey("So11111111111111111111111111111111111111112");
-      const pdaUsdc = deriveVaultPda(TEST_MINT, 0);
-      const pdaSol = deriveVaultPda(otherMint, 0);
+      const pdaUsdc = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
+      const pdaSol = deriveVaultPda(otherMint, 0, PROGRAM_ID);
       expect(pdaUsdc.equals(pdaSol)).toBe(false);
     });
 
@@ -73,27 +73,27 @@ describe("PDA derivation", () => {
         ],
         PROGRAM_ID
       );
-      const actual = deriveVaultPda(TEST_MINT, vaultId);
+      const actual = deriveVaultPda(TEST_MINT, vaultId, PROGRAM_ID);
       expect(actual.equals(expected)).toBe(true);
     });
   });
 
   describe("deriveStrategyPda", () => {
     // Pre-derive the vault PDA so strategy tests use a realistic parent address.
-    const vaultPda = deriveVaultPda(TEST_MINT, 0);
+    const vaultPda = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
 
     // Same off-curve check as vault PDA.
     it("produces a valid off-curve PDA", () => {
-      const pda = deriveStrategyPda(vaultPda, 0);
+      const pda = deriveStrategyPda(vaultPda, 0, PROGRAM_ID);
       expect(PublicKey.isOnCurve(pda.toBytes())).toBe(false);
     });
 
     // Each strategy in a vault gets a unique sequential ID (0, 1, 2, ...).
     // Different IDs must produce different PDAs — no collisions.
     it("different strategy IDs produce different PDAs", () => {
-      const pda0 = deriveStrategyPda(vaultPda, 0);
-      const pda1 = deriveStrategyPda(vaultPda, 1);
-      const pda2 = deriveStrategyPda(vaultPda, 2);
+      const pda0 = deriveStrategyPda(vaultPda, 0, PROGRAM_ID);
+      const pda1 = deriveStrategyPda(vaultPda, 1, PROGRAM_ID);
+      const pda2 = deriveStrategyPda(vaultPda, 2, PROGRAM_ID);
       expect(pda0.equals(pda1)).toBe(false);
       expect(pda1.equals(pda2)).toBe(false);
     });
@@ -108,19 +108,19 @@ describe("PDA derivation", () => {
         ],
         PROGRAM_ID
       );
-      expect(deriveStrategyPda(vaultPda, 0).equals(expected)).toBe(true);
+      expect(deriveStrategyPda(vaultPda, 0, PROGRAM_ID).equals(expected)).toBe(true);
     });
   });
 
   describe("deriveStrategyTokenPda", () => {
-    const vaultPda = deriveVaultPda(TEST_MINT, 0);
+    const vaultPda = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
 
     // The strategy PDA and its token account PDA share the same vault + ID,
     // but differ in the seed prefix ("strategy" vs "strategy_token").
     // They MUST be different — one holds metadata, the other holds tokens.
     it("produces a different PDA than the strategy PDA for the same ID", () => {
-      const strategyPda = deriveStrategyPda(vaultPda, 0);
-      const tokenPda = deriveStrategyTokenPda(vaultPda, 0);
+      const strategyPda = deriveStrategyPda(vaultPda, 0, PROGRAM_ID);
+      const tokenPda = deriveStrategyTokenPda(vaultPda, 0, PROGRAM_ID);
       expect(strategyPda.equals(tokenPda)).toBe(false);
     });
 
@@ -134,13 +134,13 @@ describe("PDA derivation", () => {
         ],
         PROGRAM_ID
       );
-      expect(deriveStrategyTokenPda(vaultPda, 0).equals(expected)).toBe(true);
+      expect(deriveStrategyTokenPda(vaultPda, 0, PROGRAM_ID).equals(expected)).toBe(true);
     });
   });
 
   describe("deriveAllowedActionPda", () => {
-    const vaultPda = deriveVaultPda(TEST_MINT, 0);
-    const strategyPda = deriveStrategyPda(vaultPda, 0);
+    const vaultPda = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
+    const strategyPda = deriveStrategyPda(vaultPda, 0, PROGRAM_ID);
 
     // CRITICAL: AllowedAction uses u16 LE (2 bytes) for the action_id seed,
     // NOT u64 LE (8 bytes) like vault/strategy IDs. This matches the on-chain
@@ -155,13 +155,13 @@ describe("PDA derivation", () => {
         ],
         PROGRAM_ID
       );
-      expect(deriveAllowedActionPda(strategyPda, 0).equals(expected)).toBe(true);
+      expect(deriveAllowedActionPda(strategyPda, 0, PROGRAM_ID).equals(expected)).toBe(true);
     });
 
     // Same uniqueness check — different action IDs must produce different PDAs.
     it("different action IDs produce different PDAs", () => {
-      const pda0 = deriveAllowedActionPda(strategyPda, 0);
-      const pda1 = deriveAllowedActionPda(strategyPda, 1);
+      const pda0 = deriveAllowedActionPda(strategyPda, 0, PROGRAM_ID);
+      const pda1 = deriveAllowedActionPda(strategyPda, 1, PROGRAM_ID);
       expect(pda0.equals(pda1)).toBe(false);
     });
 
@@ -177,7 +177,7 @@ describe("PDA derivation", () => {
         ],
         PROGRAM_ID
       );
-      expect(deriveAllowedActionPda(strategyPda, 256).equals(expected)).toBe(true);
+      expect(deriveAllowedActionPda(strategyPda, 256, PROGRAM_ID).equals(expected)).toBe(true);
     });
   });
 });

@@ -47,7 +47,8 @@ anchor deploy
 - **`tests/`** — TypeScript integration tests using `@coral-xyz/anchor` client, Mocha, and Chai.
 - **`target/types/`** — Auto-generated TypeScript IDL types (created by `anchor build`).
 - **`app/`** — Next.js 16 frontend with React hooks for program interaction.
-- **`agent/`** — AI agent placeholder (Claude + Solana Agent Kit).
+- **`agent/shared/`** — Shared agent code (types, vault-client PDA derivation).
+- **`agent/lulo/`** — Lulo lending agent (Claude + execute_strategy_action).
 
 ## Key Patterns
 
