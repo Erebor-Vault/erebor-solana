@@ -162,7 +162,7 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
                 reportYield(
                   strategy.strategyId.toNumber(),
                   strategy.tokenAccount,
-                  strategy.positionPda ? [strategy.positionPda] : undefined
+                  strategy.positionPdas.length ? strategy.positionPdas : undefined
                 )
               )
             }

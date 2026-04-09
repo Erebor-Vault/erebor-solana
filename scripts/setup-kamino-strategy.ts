@@ -19,13 +19,21 @@
  *   --weight 5000   (50% of vault → strategy)
  *   --deposit 100000000   (100 USDC)
  *   --allocate 50000000   (50 USDC)
+ *
+ * Optional mint flags (reuse existing mints instead of creating new ones):
+ *   --mint <USDC>       Reuse an existing USDC mint (e.g. one created by create-strategies.ts)
+ *   --btc-mint <BTC>    Reuse an existing BTC mint
+ *   --sol-mint <SOL>    Reuse an existing SOL mint
+ *   --vault-id <N>      Vault ID (default 0). Use 0 to share a vault with the Lulo strategy.
+ *
+ * The script is idempotent: if the oracle/reserve/pool/vault/strategy/obligation
+ * already exist on-chain, it skips initialization and reuses them.
  */
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { MyProject } from "../target/types/my_project";
 import { MockKamino } from "../target/types/mock_kamino";
-import { MockJupiter } from "../target/types/mock_jupiter";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   createMint,
@@ -65,15 +73,23 @@ function parseArgs() {
   let allocateAmount = 50_000_000;
   let rpcUrl = "https://api.devnet.solana.com";
   let walletPath = "./id.json";
+  let usdcMintArg = "";
+  let btcMintArg = "";
+  let solMintArg = "";
+  let vaultId = 0;
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case "--delegate": delegatePath = args[++i]; break;
-      case "--weight":   weightBps = Number(args[++i]); break;
-      case "--deposit":  depositAmount = Number(args[++i]); break;
-      case "--allocate": allocateAmount = Number(args[++i]); break;
-      case "--rpc":      rpcUrl = args[++i]; break;
-      case "--wallet":   walletPath = args[++i]; break;
+      case "--delegate":  delegatePath = args[++i]; break;
+      case "--weight":    weightBps = Number(args[++i]); break;
+      case "--deposit":   depositAmount = Number(args[++i]); break;
+      case "--allocate":  allocateAmount = Number(args[++i]); break;
+      case "--rpc":       rpcUrl = args[++i]; break;
+      case "--wallet":    walletPath = args[++i]; break;
+      case "--mint":      usdcMintArg = args[++i]; break;
+      case "--btc-mint":  btcMintArg = args[++i]; break;
+      case "--sol-mint":  solMintArg = args[++i]; break;
+      case "--vault-id":  vaultId = Number(args[++i]); break;
     }
   }
 
@@ -82,7 +98,11 @@ function parseArgs() {
     process.exit(1);
   }
 
-  return { delegatePath, weightBps, depositAmount, allocateAmount, rpcUrl, walletPath };
+  return { delegatePath, weightBps, depositAmount, allocateAmount, rpcUrl, walletPath, usdcMintArg, btcMintArg, solMintArg, vaultId };
+}
+
+async function accountExists(connection: anchor.web3.Connection, addr: PublicKey): Promise<boolean> {
+  return (await connection.getAccountInfo(addr)) !== null;
 }
 
 function loadKeypair(path: string): Keypair {
@@ -115,23 +135,28 @@ async function main() {
 
   const vaultProgram = anchor.workspace.myProject as Program<MyProject>;
   const kaminoProgram = anchor.workspace.mockKamino as Program<MockKamino>;
-  const jupiterProgram = anchor.workspace.mockJupiter as Program<MockJupiter>;
 
   console.log("\n=== Erebor Kamino Looper Setup ===\n");
   console.log(`Deployer:      ${payer.publicKey.toBase58()}`);
   console.log(`Agent:         ${delegateKeypair.publicKey.toBase58()}`);
   console.log(`Vault Program: ${vaultProgram.programId.toBase58()}`);
   console.log(`Kamino:        ${kaminoProgram.programId.toBase58()}`);
-  console.log(`Jupiter:       ${jupiterProgram.programId.toBase58()}\n`);
+  console.log(`Jupiter:       (closed — deferred, see TODO.md)\n`);
 
-  // ── Step 1: Create test mints ──────────────────────────────────────────
-  console.log("1. Creating test token mints (USDC, BTC, SOL)...");
-  const usdcMint = await createMint(connection, payer, payer.publicKey, null, 6);
-  const btcMint = await createMint(connection, payer, payer.publicKey, null, 6);
-  const solMint = await createMint(connection, payer, payer.publicKey, null, 6);
-  console.log(`   USDC: ${usdcMint.toBase58()}`);
-  console.log(`   BTC:  ${btcMint.toBase58()}`);
-  console.log(`   SOL:  ${solMint.toBase58()}`);
+  // ── Step 1: Resolve mints (reuse if provided, else create) ─────────────
+  console.log("1. Resolving token mints (USDC, BTC, SOL)...");
+  const usdcMint = opts.usdcMintArg
+    ? new PublicKey(opts.usdcMintArg)
+    : await createMint(connection, payer, payer.publicKey, null, 6);
+  const btcMint = opts.btcMintArg
+    ? new PublicKey(opts.btcMintArg)
+    : await createMint(connection, payer, payer.publicKey, null, 6);
+  const solMint = opts.solMintArg
+    ? new PublicKey(opts.solMintArg)
+    : await createMint(connection, payer, payer.publicKey, null, 6);
+  console.log(`   USDC: ${usdcMint.toBase58()}${opts.usdcMintArg ? " (reused)" : " (new)"}`);
+  console.log(`   BTC:  ${btcMint.toBase58()}${opts.btcMintArg ? " (reused)" : " (new)"}`);
+  console.log(`   SOL:  ${solMint.toBase58()}${opts.solMintArg ? " (reused)" : " (new)"}`);
 
   // ── Step 2: Initialize mock_kamino oracle + reserves ───────────────────
   console.log("\n2. Initializing mock_kamino oracle and reserves...");
@@ -140,19 +165,23 @@ async function main() {
     kaminoProgram.programId
   );
 
-  await kaminoProgram.methods
-    .initializeOracle(
-      new BN(DEFAULT_USDC_PRICE),
-      new BN(DEFAULT_BTC_PRICE),
-      new BN(DEFAULT_SOL_PRICE)
-    )
-    .accountsStrict({
-      admin: payer.publicKey,
-      oracle: kaminoOraclePda,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-  console.log(`   Kamino oracle: ${kaminoOraclePda.toBase58()}`);
+  if (await accountExists(connection, kaminoOraclePda)) {
+    console.log(`   Kamino oracle already exists at ${kaminoOraclePda.toBase58()} (reusing)`);
+  } else {
+    await kaminoProgram.methods
+      .initializeOracle(
+        new BN(DEFAULT_USDC_PRICE),
+        new BN(DEFAULT_BTC_PRICE),
+        new BN(DEFAULT_SOL_PRICE)
+      )
+      .accountsStrict({
+        admin: payer.publicKey,
+        oracle: kaminoOraclePda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    console.log(`   Kamino oracle: ${kaminoOraclePda.toBase58()}`);
+  }
 
   // Initialize reserves for each asset (supply 6%, borrow 4%)
   for (const [name, mint] of [["USDC", usdcMint], ["BTC", btcMint], ["SOL", solMint]] as const) {
@@ -165,84 +194,38 @@ async function main() {
       kaminoProgram.programId
     );
 
-    await kaminoProgram.methods
-      .initializeReserve(600, 400) // 6% supply, 4% borrow
-      .accountsStrict({
-        payer: payer.publicKey,
-        mint,
-        reserve: reservePda,
-        treasury: treasuryPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-    console.log(`   ${name} reserve: ${reservePda.toBase58()}`);
+    if (await accountExists(connection, reservePda)) {
+      console.log(`   ${name} reserve already exists at ${reservePda.toBase58()} (reusing)`);
+    } else {
+      await kaminoProgram.methods
+        .initializeReserve(600, 400) // 6% supply, 4% borrow
+        .accountsStrict({
+          payer: payer.publicKey,
+          mint,
+          reserve: reservePda,
+          treasury: treasuryPda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      console.log(`   ${name} reserve: ${reservePda.toBase58()}`);
 
-    // Fund the reserve treasury so borrowing has liquidity
-    await mintTo(connection, payer, mint, treasuryPda, payer, 1_000_000_000);
-    console.log(`   ${name} treasury seeded with 1000 tokens`);
+      // Fund the reserve treasury so borrowing has liquidity
+      await mintTo(connection, payer, mint, treasuryPda, payer, 1_000_000_000);
+      console.log(`   ${name} treasury seeded with 1000 tokens`);
+    }
   }
 
-  // ── Step 3: Initialize mock_jupiter oracle + pools ─────────────────────
-  console.log("\n3. Initializing mock_jupiter oracle and pools...");
-  const [jupOraclePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("prices_jup")],
-    jupiterProgram.programId
-  );
+  // ── Step 3: (removed) mock_jupiter init ────────────────────────────────
+  // mock_jupiter was closed on devnet to reclaim rent since no agent uses
+  // swaps yet. Jupiter swaps are deferred — see agent/kamino_looper/TODO.md
+  // items #13 (slippage retry) and #19 (Jupiter quote API). Restore this
+  // block when hedges/rewards land and the program is redeployed.
+  console.log("\n3. Skipping mock_jupiter init (program closed — see TODO.md)");
 
-  await jupiterProgram.methods
-    .initializeOracle(
-      new BN(DEFAULT_USDC_PRICE),
-      new BN(DEFAULT_BTC_PRICE),
-      new BN(DEFAULT_SOL_PRICE)
-    )
-    .accountsStrict({
-      admin: payer.publicKey,
-      oracle: jupOraclePda,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-  console.log(`   Jupiter oracle: ${jupOraclePda.toBase58()}`);
-
-  for (const [name, mint] of [["USDC", usdcMint], ["BTC", btcMint], ["SOL", solMint]] as const) {
-    const [poolPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("pool"), mint.toBuffer()],
-      jupiterProgram.programId
-    );
-    const [poolTokenPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("pool_token"), mint.toBuffer()],
-      jupiterProgram.programId
-    );
-
-    await jupiterProgram.methods
-      .initializePool()
-      .accountsStrict({
-        payer: payer.publicKey,
-        mint,
-        pool: poolPda,
-        poolTokenAccount: poolTokenPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-    console.log(`   ${name} pool: ${poolPda.toBase58()}`);
-
-    // Fund the pool with 1000 tokens of liquidity
-    await jupiterProgram.methods
-      .fundPool(new BN(1_000_000_000))
-      .accountsStrict({
-        mintAuthority: payer.publicKey,
-        mint,
-        poolTokenAccount: poolTokenPda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .rpc();
-    console.log(`   ${name} pool funded with 1000 tokens`);
-  }
-
-  // ── Step 4: Initialize Erebor vault ────────────────────────────────────
-  console.log("\n4. Initializing Erebor vault for USDC...");
-  const vaultId = new BN(0);
+  // ── Step 4: Initialize Erebor vault (or reuse existing) ────────────────
+  console.log(`\n4. Initializing Erebor vault for USDC (vault_id=${opts.vaultId})...`);
+  const vaultId = new BN(opts.vaultId);
   const [vaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), usdcMint.toBuffer(), vaultId.toArrayLike(Buffer, "le", 8)],
     vaultProgram.programId
@@ -253,24 +236,32 @@ async function main() {
   );
   const reserveAta = anchor.utils.token.associatedAddress({ mint: usdcMint, owner: vaultPda });
 
-  await vaultProgram.methods
-    .initializeVault(vaultId)
-    .accountsStrict({
-      admin: payer.publicKey,
-      vaultState: vaultPda,
-      tokenMint: usdcMint,
-      shareMint: shareMintPda,
-      reserveAta,
-      systemProgram: SystemProgram.programId,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-    })
-    .rpc();
-  console.log(`   Vault PDA: ${vaultPda.toBase58()}`);
+  if (await accountExists(connection, vaultPda)) {
+    console.log(`   Vault already exists at ${vaultPda.toBase58()} (reusing)`);
+  } else {
+    await vaultProgram.methods
+      .initializeVault(vaultId)
+      .accountsStrict({
+        admin: payer.publicKey,
+        vaultState: vaultPda,
+        tokenMint: usdcMint,
+        shareMint: shareMintPda,
+        reserveAta,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    console.log(`   Vault PDA: ${vaultPda.toBase58()}`);
+  }
 
   // ── Step 5: Create strategy ────────────────────────────────────────────
-  console.log("\n5. Creating strategy with kamino_looper as delegate...");
-  const strategyIndex = 0;
+  // Read strategy_count from the existing vault so this script appends
+  // a fresh strategy slot rather than trying to claim slot 0 (which may be
+  // taken by a sibling strategy like the Lulo agent).
+  const vaultState = await vaultProgram.account.vaultState.fetch(vaultPda);
+  const strategyIndex = vaultState.strategyCount.toNumber();
+  console.log(`\n5. Creating strategy #${strategyIndex} with kamino_looper as delegate...`);
   const [strategyPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(strategyIndex).toArrayLike(Buffer, "le", 8)],
     vaultProgram.programId
@@ -280,47 +271,75 @@ async function main() {
     vaultProgram.programId
   );
 
-  await vaultProgram.methods
-    .createStrategy()
-    .accountsStrict({
-      admin: payer.publicKey,
-      vaultState: vaultPda,
-      strategy: strategyPda,
-      tokenMint: usdcMint,
-      strategyTokenAccount: strategyTokenPda,
-      delegate: delegateKeypair.publicKey,
-      systemProgram: SystemProgram.programId,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .rpc();
-  console.log(`   Strategy PDA: ${strategyPda.toBase58()}`);
-  console.log(`   Strategy token: ${strategyTokenPda.toBase58()}`);
+  if (await accountExists(connection, strategyPda)) {
+    console.log(`   Strategy already exists at ${strategyPda.toBase58()} (reusing)`);
+  } else {
+    await vaultProgram.methods
+      .createStrategy()
+      .accountsStrict({
+        admin: payer.publicKey,
+        vaultState: vaultPda,
+        strategy: strategyPda,
+        tokenMint: usdcMint,
+        strategyTokenAccount: strategyTokenPda,
+        delegate: delegateKeypair.publicKey,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    console.log(`   Strategy PDA: ${strategyPda.toBase58()}`);
+    console.log(`   Strategy token: ${strategyTokenPda.toBase58()}`);
 
-  await vaultProgram.methods
-    .setStrategyWeight(opts.weightBps)
-    .accountsStrict({
-      admin: payer.publicKey,
-      vaultState: vaultPda,
-      strategy: strategyPda,
-    })
-    .rpc();
+    await vaultProgram.methods
+      .setStrategyWeight(opts.weightBps)
+      .accountsStrict({
+        admin: payer.publicKey,
+        vaultState: vaultPda,
+        strategy: strategyPda,
+      })
+      .rpc();
+  }
 
-  // ── Step 6: Initialize obligation for the strategy ─────────────────────
-  console.log("\n6. Initializing kamino obligation for strategy...");
+  // ── Step 6: Initialize obligation + ProtocolPosition for the strategy ─
+  console.log("\n6. Initializing kamino obligation + ProtocolPosition for strategy...");
   const [obligationPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("obligation"), strategyTokenPda.toBuffer()],
     kaminoProgram.programId
   );
-  await kaminoProgram.methods
-    .initializeObligation()
-    .accountsStrict({
-      payer: payer.publicKey,
-      strategyTokenAccount: strategyTokenPda,
-      obligation: obligationPda,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-  console.log(`   Obligation PDA: ${obligationPda.toBase58()}`);
+  if (await accountExists(connection, obligationPda)) {
+    console.log(`   Obligation already exists at ${obligationPda.toBase58()} (reusing)`);
+  } else {
+    await kaminoProgram.methods
+      .initializeObligation()
+      .accountsStrict({
+        payer: payer.publicKey,
+        strategyTokenAccount: strategyTokenPda,
+        obligation: obligationPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    console.log(`   Obligation PDA: ${obligationPda.toBase58()}`);
+  }
+
+  // ProtocolPosition adapter (for ERC-4626 totalAssets parity on the frontend).
+  const [kaminoPositionPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), strategyTokenPda.toBuffer()],
+    kaminoProgram.programId
+  );
+  if (await accountExists(connection, kaminoPositionPda)) {
+    console.log(`   ProtocolPosition already exists at ${kaminoPositionPda.toBase58()} (reusing)`);
+  } else {
+    await kaminoProgram.methods
+      .initializeKaminoPosition()
+      .accountsStrict({
+        payer: payer.publicKey,
+        strategyTokenAccount: strategyTokenPda,
+        position: kaminoPositionPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    console.log(`   ProtocolPosition PDA: ${kaminoPositionPda.toBase58()}`);
+  }
 
   // ── Step 7: Whitelist mock_kamino actions ──────────────────────────────
   console.log("\n7. Whitelisting mock_kamino actions...");
@@ -352,7 +371,10 @@ async function main() {
 
   // ── Step 8: Fund deployer + deposit + allocate ─────────────────────────
   console.log("\n8. Minting test USDC and funding the strategy...");
-  const payerAta = await createAssociatedTokenAccount(connection, payer, usdcMint, payer.publicKey);
+  const payerAta = anchor.utils.token.associatedAddress({ mint: usdcMint, owner: payer.publicKey });
+  if (!(await accountExists(connection, payerAta))) {
+    await createAssociatedTokenAccount(connection, payer, usdcMint, payer.publicKey);
+  }
   await mintTo(connection, payer, usdcMint, payerAta, payer, opts.depositAmount * 2);
 
   const payerShareAta = anchor.utils.token.associatedAddress({ mint: shareMintPda, owner: payer.publicKey });
@@ -396,7 +418,7 @@ async function main() {
   console.log(`VAULT_ID=0`);
   console.log(`STRATEGY_ID=${strategyIndex}`);
   console.log(`KAMINO_PROGRAM_ID=${kaminoProgram.programId.toBase58()}`);
-  console.log(`JUPITER_PROGRAM_ID=${jupiterProgram.programId.toBase58()}`);
+  // JUPITER_PROGRAM_ID intentionally omitted — mock_jupiter is closed (see TODO.md)
   console.log(`USDC_MINT=${usdcMint.toBase58()}`);
   console.log(`BTC_MINT=${btcMint.toBase58()}`);
   console.log(`SOL_MINT=${solMint.toBase58()}`);

@@ -1,13 +1,20 @@
 // leverageManager.ts — Open and close leveraged loops.
 //
-// MVP: single-iteration leverage. To reach 2x leverage on USDC:
+// MVP: single-iteration leverage. To open a leveraged USDC position:
 //   1. Deposit `amount` USDC as collateral
-//   2. Borrow `amount` USDC against it
-//   3. Deposit the borrowed USDC
-// Result: 2*amount supplied, amount borrowed, leverage = 2.0
+//   2. Borrow some fraction of `amount` USDC against it (capped by HF safety)
+//   3. Re-deposit the borrowed USDC
+// Result: (amount + borrow) supplied, borrow borrowed.
 //
-// For 3x leverage, you would do another borrow+deposit, but the MVP only
-// supports a single iteration (max 2x effective leverage per call).
+// Important: in a single-iteration loop, the borrow happens BEFORE the
+// re-deposit, so the protocol checks HF at the intermediate state where
+// supplied = amount and debt = borrow. To keep that intermediate HF above
+// a safety floor (INTERMEDIATE_HF_FLOOR), the maximum borrow is:
+//   borrow_max = amount / INTERMEDIATE_HF_FLOOR
+// This caps the achievable single-iteration leverage at:
+//   max_leverage = 1 + 1 / INTERMEDIATE_HF_FLOOR
+// For INTERMEDIATE_HF_FLOOR = 1.10 → max_leverage ≈ 1.909x.
+// True 2x+ leverage requires multi-iteration loops or flash loans (not MVP).
 
 import {
   KaminoActionContext,
@@ -17,8 +24,14 @@ import {
   kaminoWithdraw,
 } from "../chain/vault.js";
 
-// Open a USDC loop at the requested leverage.
-// For MVP, only leverage in [1.0, 2.0] is supported (single iteration).
+// Safety margin above the protocol's hard HF_MIN (mock_kamino enforces 1.05).
+// 1.10 gives a 5-point buffer so price ticks between txs don't trip the check.
+const INTERMEDIATE_HF_FLOOR = 1.10;
+const MAX_SINGLE_ITERATION_LEVERAGE = 1 + 1 / INTERMEDIATE_HF_FLOOR;
+
+// Open a USDC loop at the requested leverage (single iteration).
+// If the requested leverage exceeds what a single iteration can achieve,
+// the borrow is silently capped and the achieved leverage will be lower.
 // Returns the list of transaction signatures for each step.
 export async function openUsdcLoop(
   ctx: KaminoActionContext,
@@ -27,10 +40,8 @@ export async function openUsdcLoop(
   log: (msg: string) => void
 ): Promise<string[]> {
   if (amount <= 0) throw new Error("Amount must be positive");
-  if (targetLeverage < 1.0 || targetLeverage > 2.0) {
-    throw new Error(
-      `MVP supports leverage 1.0–2.0, got ${targetLeverage}. Multi-iteration loops not implemented.`
-    );
+  if (targetLeverage < 1.0) {
+    throw new Error(`Leverage must be >= 1.0, got ${targetLeverage}`);
   }
 
   const sigs: string[] = [];
@@ -43,8 +54,18 @@ export async function openUsdcLoop(
     return sigs; // single-side lend, no borrow needed
   }
 
-  // Step 2: Borrow (leverage - 1) * amount
-  const borrowAmount = Math.floor(amount * (targetLeverage - 1));
+  // Step 2: Borrow, capped so intermediate HF stays above the safety floor.
+  const requestedBorrow = Math.floor(amount * (targetLeverage - 1));
+  const maxSafeBorrow = Math.floor(amount / INTERMEDIATE_HF_FLOOR);
+  const borrowAmount = Math.min(requestedBorrow, maxSafeBorrow);
+
+  if (borrowAmount < requestedBorrow) {
+    const achieved = 1 + borrowAmount / amount;
+    log(
+      `Capped borrow: requested ${targetLeverage.toFixed(2)}x → achievable ${achieved.toFixed(2)}x (single-iteration max ${MAX_SINGLE_ITERATION_LEVERAGE.toFixed(2)}x)`
+    );
+  }
+
   log(`Borrowing ${(borrowAmount / 1e6).toFixed(2)} USDC`);
   sigs.push(await kaminoBorrow(ctx, borrowAmount));
 

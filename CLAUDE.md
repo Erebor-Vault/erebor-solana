@@ -6,9 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Solana program built with **Anchor 0.32.1** using Rust, with TypeScript tests via ts-mocha. Package manager is **bun**.
 
-- Program ID: `6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw`
+- Program ID: `B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z`
 - Rust toolchain: `1.89.0`
 - Cluster: `devnet` (configured in Anchor.toml)
+- Mock protocol programs (devnet):
+  - `mock_lulo`: `3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm`
+  - `mock_kamino`: `S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK`
+  - `mock_jupiter`: `43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7`
 
 ## Common Commands
 

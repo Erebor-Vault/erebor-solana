@@ -34,7 +34,7 @@ import * as fs from "fs";
 const RPC_URL = "https://api.devnet.solana.com";
 const WALLET_PATH = "./id.json"; // must be the token mint authority
 const TOKEN_MINT = new PublicKey(
-  process.env.TOKEN_MINT || "3M2nY5QJdEpBCZ19QK4edNKSV1L8dNSEP3AMj64MqfUP"
+  process.env.TOKEN_MINT || "5HLVEnSQeH1dePDMh6sgcbn4mkEMZX9c3fCzqkf194Lp"
 );
 
 // Annual yield rate as a decimal. 0.05 = 5% APY.

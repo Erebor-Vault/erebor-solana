@@ -10,7 +10,7 @@ Think of it as an ERC-4626-style vault designed specifically for AI agent strate
 
 **Live app:** https://ereborvault.netlify.app/
 
-**Explorer:** [View on Solana Explorer](https://explorer.solana.com/address/6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw?cluster=devnet)
+**Explorer:** [View on Solana Explorer](https://explorer.solana.com/address/B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z?cluster=devnet)
 
 ## The problem
 
@@ -248,11 +248,14 @@ bun run start
 
 | | |
 |---|---|
-| Program ID (devnet) | `6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw` |
+| Program ID (devnet) | `B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z` |
 | Upgrade Authority | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn` |
 | Cluster | devnet |
 | Frontend | https://ereborvault.netlify.app/ |
-| Explorer | [View on Solana Explorer](https://explorer.solana.com/address/6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw?cluster=devnet) |
+| Explorer | [View on Solana Explorer](https://explorer.solana.com/address/B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z?cluster=devnet) |
+| Mock Lulo | `3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm` |
+| Mock Kamino | `S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK` |
+| Mock Jupiter | `43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7` |
 
 ## Roadmap
 

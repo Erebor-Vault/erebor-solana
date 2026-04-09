@@ -28,7 +28,7 @@ function optionalEnv(name: string, fallback: string): string {
 // The Erebor vault program ID — must match the declare_id! in lib.rs.
 // This is used for all PDA derivations and program interactions.
 export const PROGRAM_ID = new PublicKey(
-  "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
+  "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
 );
 
 // Loads and validates all environment variables, returning a frozen config object.

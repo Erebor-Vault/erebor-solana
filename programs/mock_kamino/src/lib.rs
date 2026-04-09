@@ -99,6 +99,28 @@ pub mod mock_kamino {
         Ok(())
     }
 
+    // ── ProtocolPosition ─────────────────────────────────────────────────
+
+    /// Initialize a per-strategy ProtocolPosition tracker used by the Erebor
+    /// vault's report_yield as an ERC-4626 totalAssets adapter. The position
+    /// exposes `deposited_amount` (net USDC value of the loop: supplied - borrowed)
+    /// at a fixed byte offset so the vault can read it raw without depending on
+    /// mock_kamino's IDL.
+    ///
+    /// This is separate from the Obligation (which tracks the detailed loan
+    /// state). The position is just a thin adapter for the vault.
+    pub fn initialize_kamino_position(ctx: Context<InitializeKaminoPosition>) -> Result<()> {
+        let position = &mut ctx.accounts.position;
+        position.strategy_token_account = ctx.accounts.strategy_token_account.key();
+        position.deposited_amount = 0;
+        position.bump = ctx.bumps.position;
+        msg!(
+            "ProtocolPosition initialized for strategy {:?}",
+            position.strategy_token_account
+        );
+        Ok(())
+    }
+
     // ── Deposit ──────────────────────────────────────────────────────────
 
     pub fn deposit(ctx: Context<Deposit>, asset: u8, amount: u64) -> Result<()> {
@@ -125,6 +147,10 @@ pub mod mock_kamino {
         // Update reserve total
         let reserve = &mut ctx.accounts.reserve;
         reserve.total_supplied = reserve.total_supplied.checked_add(amount).ok_or(MockKaminoError::Overflow)?;
+
+        // Sync the ProtocolPosition adapter (ERC-4626 totalAssets parity)
+        ctx.accounts.position.deposited_amount =
+            obligation_net_usdc_value(&ctx.accounts.obligation, &ctx.accounts.oracle);
 
         msg!("Deposit: asset={} amount={}", asset, amount);
         Ok(())
@@ -212,6 +238,10 @@ pub mod mock_kamino {
         let reserve = &mut ctx.accounts.reserve;
         reserve.total_supplied = reserve.total_supplied.saturating_sub(amount);
 
+        // Sync ProtocolPosition adapter
+        ctx.accounts.position.deposited_amount =
+            obligation_net_usdc_value(&ctx.accounts.obligation, &ctx.accounts.oracle);
+
         msg!("Withdraw: asset={} amount={}", asset, amount);
         Ok(())
     }
@@ -287,6 +317,10 @@ pub mod mock_kamino {
         let reserve = &mut ctx.accounts.reserve;
         reserve.total_borrowed = reserve.total_borrowed.checked_add(amount).ok_or(MockKaminoError::Overflow)?;
 
+        // Sync ProtocolPosition adapter
+        ctx.accounts.position.deposited_amount =
+            obligation_net_usdc_value(&ctx.accounts.obligation, &ctx.accounts.oracle);
+
         msg!("Borrow: asset={} amount={}", asset, amount);
         Ok(())
     }
@@ -329,6 +363,10 @@ pub mod mock_kamino {
         let reserve = &mut ctx.accounts.reserve;
         reserve.total_borrowed = reserve.total_borrowed.saturating_sub(repay_amount);
 
+        // Sync ProtocolPosition adapter
+        ctx.accounts.position.deposited_amount =
+            obligation_net_usdc_value(&ctx.accounts.obligation, &ctx.accounts.oracle);
+
         msg!("Repay: asset={} amount={}", asset, repay_amount);
         Ok(())
     }
@@ -370,6 +408,37 @@ fn debt_value_usd(usdc: u64, btc: u64, sol: u64, oracle: &PriceOracle) -> u128 {
     (usdc as u128) * (oracle.usdc_price as u128)
         + (btc as u128) * (oracle.btc_price as u128)
         + (sol as u128) * (oracle.sol_price as u128)
+}
+
+/// Compute the net USD value of an obligation and return it as a raw
+/// USDC token amount (micro-USDC). Used to keep the ProtocolPosition
+/// adapter in sync with the obligation after every state change.
+///
+/// net_value_tokens = (collateral_micro_usd - debt_micro_usd) / USDC_PRICE
+///
+/// Returns 0 if debt exceeds collateral (underwater position, the vault
+/// should treat it as worthless from an accounting perspective).
+fn obligation_net_usdc_value(obligation: &Obligation, oracle: &PriceOracle) -> u64 {
+    let collateral = collateral_value_usd(
+        obligation.usdc_supplied,
+        obligation.btc_supplied,
+        obligation.sol_supplied,
+        oracle,
+    );
+    let debt = debt_value_usd(
+        obligation.usdc_borrowed,
+        obligation.btc_borrowed,
+        obligation.sol_borrowed,
+        oracle,
+    );
+    if collateral <= debt {
+        return 0;
+    }
+    let net_micro_usd = collateral - debt;
+    // Convert micro-USD back to raw USDC tokens (1 USDC = 1_000_000 micro-USD
+    // and oracle.usdc_price = 1_000_000 by convention).
+    let usdc_price = oracle.usdc_price.max(1) as u128;
+    (net_micro_usd / usdc_price) as u64
 }
 
 // =============================================================================
@@ -437,6 +506,26 @@ pub struct InitializeReserve<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitializeKaminoPosition<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: The strategy token account this position tracks.
+    pub strategy_token_account: UncheckedAccount<'info>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + ProtocolPosition::INIT_SPACE,
+        seeds = [b"position", strategy_token_account.key().as_ref()],
+        bump,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct InitializeObligation<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -484,6 +573,22 @@ pub struct Deposit<'info> {
     )]
     pub obligation: Account<'info, Obligation>,
 
+    #[account(
+        seeds = [b"prices"],
+        bump = oracle.bump,
+    )]
+    pub oracle: Account<'info, PriceOracle>,
+
+    // Per-strategy ProtocolPosition tracker (ERC-4626 totalAssets adapter).
+    // Updated on every deposit/withdraw/borrow/repay.
+    #[account(
+        mut,
+        seeds = [b"position", user_token_account.key().as_ref()],
+        bump = position.bump,
+        constraint = position.strategy_token_account == user_token_account.key() @ MockKaminoError::InvalidPosition,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
+
     /// CHECK: Authority on user_token_account (vault PDA via invoke_signed).
     pub user_authority: Signer<'info>,
 
@@ -523,6 +628,14 @@ pub struct Withdraw<'info> {
         bump = oracle.bump,
     )]
     pub oracle: Account<'info, PriceOracle>,
+
+    #[account(
+        mut,
+        seeds = [b"position", user_token_account.key().as_ref()],
+        bump = position.bump,
+        constraint = position.strategy_token_account == user_token_account.key() @ MockKaminoError::InvalidPosition,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
 
     /// CHECK: Vault PDA — present for consistency, not used.
     pub user_authority: UncheckedAccount<'info>,
@@ -564,6 +677,14 @@ pub struct Borrow<'info> {
     )]
     pub oracle: Account<'info, PriceOracle>,
 
+    #[account(
+        mut,
+        seeds = [b"position", user_token_account.key().as_ref()],
+        bump = position.bump,
+        constraint = position.strategy_token_account == user_token_account.key() @ MockKaminoError::InvalidPosition,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
+
     /// CHECK: Vault PDA — present for consistency.
     pub user_authority: UncheckedAccount<'info>,
 
@@ -597,6 +718,20 @@ pub struct Repay<'info> {
         bump = obligation.bump,
     )]
     pub obligation: Account<'info, Obligation>,
+
+    #[account(
+        seeds = [b"prices"],
+        bump = oracle.bump,
+    )]
+    pub oracle: Account<'info, PriceOracle>,
+
+    #[account(
+        mut,
+        seeds = [b"position", user_token_account.key().as_ref()],
+        bump = position.bump,
+        constraint = position.strategy_token_account == user_token_account.key() @ MockKaminoError::InvalidPosition,
+    )]
+    pub position: Account<'info, ProtocolPosition>,
 
     pub user_authority: Signer<'info>,
 
@@ -679,6 +814,25 @@ pub struct Obligation {
     pub bump: u8,                       // 1
 }
 
+/// Per-strategy ProtocolPosition — the ERC-4626 totalAssets adapter.
+/// The Erebor vault's `report_yield` instruction reads this account raw
+/// (no Anchor dep) at fixed byte offsets:
+///   bytes 8..40:  strategy_token_account (Pubkey)
+///   bytes 40..48: deposited_amount (u64 LE, net USDC value of the loop)
+///
+/// `deposited_amount` is kept in sync with the Obligation by every
+/// deposit/withdraw/borrow/repay — it equals (collateral_usd - debt_usd)
+/// converted back to raw USDC tokens.
+///
+/// Seeds: ["position", strategy_token_account]
+#[account]
+#[derive(InitSpace)]
+pub struct ProtocolPosition {
+    pub strategy_token_account: Pubkey, // 32
+    pub deposited_amount: u64,          // 8 — net USDC value
+    pub bump: u8,                       // 1
+}
+
 // =============================================================================
 // ERRORS
 // =============================================================================
@@ -705,4 +859,7 @@ pub enum MockKaminoError {
 
     #[msg("Unauthorized")]
     Unauthorized,
+
+    #[msg("ProtocolPosition does not match strategy token account")]
+    InvalidPosition,
 }

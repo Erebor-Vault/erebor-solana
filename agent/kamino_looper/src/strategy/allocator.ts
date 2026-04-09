@@ -85,8 +85,21 @@ export function decideAllocation(
     };
   }
 
-  // Step 4: Position exists — check if it needs adjustment
-  // For MVP, we just hold existing positions (no leverage rebalancing)
+  // Step 4a: Orphaned non-leveraged position cleanup.
+  // A position with collateral but zero debt usually means a previous loop
+  // partially executed (deposit succeeded, borrow failed) and left the
+  // collateral stranded. Close it so the next cycle can open a fresh
+  // leveraged loop with the freed-up idle funds.
+  if (portfolio.suppliedUsdc > 0 && portfolio.borrowedUsdc === 0) {
+    return {
+      action: "CLOSE_LOOP",
+      asset: "USDC",
+      reason: `Orphaned position (supplied=${(portfolio.suppliedUsdc / 1e6).toFixed(2)} USDC, no debt) — closing to reset`,
+    };
+  }
+
+  // Step 4b: Position exists and is leveraged — hold it.
+  // For MVP, we don't rebalance the existing leverage.
   return {
     action: "NONE",
     reason: `Position open with HF=${portfolio.healthFactor.toFixed(2)}, holding`,

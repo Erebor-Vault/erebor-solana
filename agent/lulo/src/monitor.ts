@@ -170,6 +170,28 @@ async function pollCycle(
     }`
   );
 
+  // ── Step 3.5: Deterministic LEND pre-check ────────────────────────────────
+  // Bypass the LLM entirely for the trivial "fresh deposit, nothing lent" case.
+  // If there are idle funds above the minimum lend amount and the lent balance
+  // is zero, just lend the idle (minus a 5% buffer) without asking the LLM.
+  // This is rule 1 + rule 10 combined: there's no judgment to make here.
+  // It also handles LLM non-determinism — Haiku has been seen ignoring rule 10
+  // and deciding HOLD on small "trivially-lendable" balances.
+  // Note: tokenBalance == idle since the lent portion lives in the protocol treasury, not the strategy token account.
+  if (lentBalance === 0 && tokenBalance >= config.minLendAmount) {
+    const buffer = Math.floor(totalAssets * 0.05);
+    const lendAmount = Math.max(0, tokenBalance - buffer);
+    if (lendAmount >= config.minLendAmount) {
+      console.log(
+        `  [pre-check] LEND ${(lendAmount / 1e6).toFixed(2)} USDC (idle ${(tokenBalance / 1e6).toFixed(2)}, 5% buffer ${(buffer / 1e6).toFixed(2)}) — skipping LLM`
+      );
+      await protocol.execute({ action: "LEND", amount: lendAmount });
+      state.lastBalance = totalAssets;
+      state.lastSnapshot = snapshot;
+      return;
+    }
+  }
+
   // ── Step 4: LLM Decision ──────────────────────────────────────────────────
   // Only consult the LLM when something meaningful happened:
   // - External state changed: authority allocated/deallocated, yield accrued

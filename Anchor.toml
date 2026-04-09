@@ -6,19 +6,19 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
-mock_kamino = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
 mock_jupiter = "43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7"
-my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
+mock_kamino = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
+mock_lulo = "3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm"
+my_project = "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
 
 [programs.localnet]
-mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
-mock_kamino = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
 mock_jupiter = "43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7"
-my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
+mock_kamino = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
+mock_lulo = "3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm"
+my_project = "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
 
 [programs.mainnet]
-my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
+my_project = "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
 
 [registry]
 url = "https://api.apr.dev"

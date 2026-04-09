@@ -64,14 +64,27 @@ export interface KaminoActionContext {
   asset: AssetCode;
 }
 
+// Derive the ProtocolPosition PDA for a given strategy token account.
+// Kept in sync with the obligation by mock_kamino on every state change
+// (ERC-4626 totalAssets adapter).
+function deriveKaminoPositionPda(
+  strategyTokenAccount: PublicKey,
+  kaminoProgramId: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), strategyTokenAccount.toBuffer()],
+    kaminoProgramId
+  );
+  return pda;
+}
+
 // Send a kamino deposit/withdraw/borrow/repay through execute_strategy_action.
 // Looks up the AllowedAction PDA matching the discriminator, builds the CPI
 // remaining_accounts (matching mock_kamino's expected layout), and submits.
 export async function executeKaminoAction(
   ctx: KaminoActionContext,
   discriminator: number[],
-  amount: number,
-  needsOracle: boolean
+  amount: number
 ): Promise<TransactionSignature> {
   // Find the matching AllowedAction
   const strategy = await ctx.vaultProgram.account.strategyAllocation.fetch(
@@ -97,31 +110,24 @@ export async function executeKaminoAction(
     ctx.strategyTokenPda,
     ctx.kaminoProgramId
   );
+  const oraclePda = deriveKaminoOraclePda(ctx.kaminoProgramId);
+  const positionPda = deriveKaminoPositionPda(ctx.strategyTokenPda, ctx.kaminoProgramId);
 
   // Build remaining_accounts matching mock_kamino's Deposit/Withdraw/Borrow/Repay
-  // account structs in order:
-  //   mint, user_token_account, treasury, reserve, obligation, [oracle], user_authority, token_program
+  // account structs. After the ProtocolPosition adapter change, all 4 handlers
+  // share the same layout:
+  //   mint, user_token_account, treasury, reserve, obligation, oracle, position, user_authority, token_program
   const remainingAccounts = [
     { pubkey: ctx.mint, isSigner: false, isWritable: false },
     { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
     { pubkey: treasuryPda, isSigner: false, isWritable: true },
     { pubkey: reservePda, isSigner: false, isWritable: true },
     { pubkey: obligationPda, isSigner: false, isWritable: true },
-  ];
-
-  // withdraw and borrow need the oracle (HF check)
-  if (needsOracle) {
-    remainingAccounts.push({
-      pubkey: deriveKaminoOraclePda(ctx.kaminoProgramId),
-      isSigner: false,
-      isWritable: false,
-    });
-  }
-
-  remainingAccounts.push(
+    { pubkey: oraclePda, isSigner: false, isWritable: false },
+    { pubkey: positionPda, isSigner: false, isWritable: true },
     { pubkey: ctx.vaultPda, isSigner: false, isWritable: false }, // user_authority (vault PDA)
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }
-  );
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
 
   const instructionData = buildKaminoInstructionData(discriminator, ctx.asset, amount);
 
@@ -143,26 +149,26 @@ export async function kaminoDeposit(
   ctx: KaminoActionContext,
   amount: number
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_DEPOSIT_DISCRIMINATOR, amount, false);
+  return executeKaminoAction(ctx, KAMINO_DEPOSIT_DISCRIMINATOR, amount);
 }
 
 export async function kaminoWithdraw(
   ctx: KaminoActionContext,
   amount: number
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_WITHDRAW_DISCRIMINATOR, amount, true);
+  return executeKaminoAction(ctx, KAMINO_WITHDRAW_DISCRIMINATOR, amount);
 }
 
 export async function kaminoBorrow(
   ctx: KaminoActionContext,
   amount: number
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_BORROW_DISCRIMINATOR, amount, true);
+  return executeKaminoAction(ctx, KAMINO_BORROW_DISCRIMINATOR, amount);
 }
 
 export async function kaminoRepay(
   ctx: KaminoActionContext,
   amount: number
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_REPAY_DISCRIMINATOR, amount, false);
+  return executeKaminoAction(ctx, KAMINO_REPAY_DISCRIMINATOR, amount);
 }

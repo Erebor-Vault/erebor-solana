@@ -7,11 +7,17 @@ import BN from "bn.js";
 import { useVaultProgram } from "./useVaultProgram";
 import { useVault } from "@/components/providers/VaultProvider";
 
-// Mock Lulo program ID — used to derive position PDAs.
-// TODO: make this configurable if supporting multiple protocols.
-const MOCK_LULO_PROGRAM_ID = new PublicKey(
-  "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
-);
+// Protocol program IDs whose ProtocolPosition PDAs the frontend knows how
+// to read. All listed programs expose the same adapter layout:
+//   seeds:   ["position", strategy_token_account]
+//   bytes 8..40   strategy_token_account (Pubkey)
+//   bytes 40..48  deposited_amount (u64 LE)
+// For each strategy, we probe every ID and use the first PDA that exists.
+// Add new protocol integrations here.
+const PROTOCOL_POSITION_PROGRAM_IDS: PublicKey[] = [
+  new PublicKey("3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm"), // mock_lulo
+  new PublicKey("S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"), // mock_kamino
+];
 
 export interface StrategyData {
   publicKey: PublicKey;
@@ -23,9 +29,10 @@ export interface StrategyData {
   isActive: boolean;
   targetWeightBps: number;
   actualBalance: BN;       // tokens idle in strategy token account
-  externalPosition: BN;    // tokens deployed to external protocol
+  externalPosition: BN;    // Σ(tokens deployed to external protocols)
   totalValue: BN;          // actualBalance + externalPosition
-  positionPda: PublicKey | null; // protocol position PDA (for report_yield)
+  positionPda: PublicKey | null; // first matching protocol position PDA (legacy)
+  positionPdas: PublicKey[];     // all matching protocol position PDAs (for report_yield)
 }
 
 export function useStrategies() {
@@ -60,15 +67,21 @@ export function useStrategies() {
       );
       const balanceInfos = await connection.getMultipleAccountsInfo(tokenAccountKeys);
 
-      // Derive and batch-fetch protocol position PDAs
-      const positionPdas = tokenAccountKeys.map((tokenAcct: PublicKey) => {
-        const [pda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("position"), tokenAcct.toBuffer()],
-          MOCK_LULO_PROGRAM_ID
-        );
-        return pda;
-      });
-      const positionInfos = await connection.getMultipleAccountsInfo(positionPdas);
+      // Derive ProtocolPosition PDAs for every (strategy, protocol) pair and
+      // batch-fetch them in a single RPC call. Shape: [strategy_i][protocol_j].
+      const pdaMatrix: PublicKey[][] = tokenAccountKeys.map(
+        (tokenAcct: PublicKey) =>
+          PROTOCOL_POSITION_PROGRAM_IDS.map((progId) => {
+            const [pda] = PublicKey.findProgramAddressSync(
+              [Buffer.from("position"), tokenAcct.toBuffer()],
+              progId
+            );
+            return pda;
+          })
+      );
+      const flatPdas = pdaMatrix.flat();
+      const flatInfos = await connection.getMultipleAccountsInfo(flatPdas);
+      const protocolCount = PROTOCOL_POSITION_PROGRAM_IDS.length;
 
       const strategiesWithBalances = accounts.map((acc: any, i: number) => {
         // Read strategy token account balance (idle funds)
@@ -78,15 +91,27 @@ export function useStrategies() {
           actualBalance = new BN(info.data.subarray(64, 72), "le");
         }
 
-        // Read protocol position (external funds deployed to protocol)
-        // ProtocolPosition layout: [8 discriminator][32 strategy_token_account][8 deposited_amount][1 bump]
+        // Read protocol position(s) — sum across every protocol whose
+        // ProtocolPosition PDA exists for this strategy. ERC-4626
+        // totalAssets semantics: idle balance + Σ(external positions).
+        //
+        // ProtocolPosition layout (raw bytes, shared across protocols):
+        //   [8 discriminator][32 strategy_token][8 deposited_amount][1 bump]
+        //
+        // positionPda is set to the first matching PDA — used by
+        // report_yield callers to pass remaining_accounts in the same order.
         let externalPosition = new BN(0);
-        let positionPda: PublicKey | null = null;
-        const posInfo = positionInfos[i];
-        if (posInfo?.data && posInfo.data.length >= 48) {
-          externalPosition = new BN(posInfo.data.subarray(40, 48), "le");
-          positionPda = positionPdas[i];
+        const positionPdas: PublicKey[] = [];
+        for (let j = 0; j < protocolCount; j++) {
+          const posInfo = flatInfos[i * protocolCount + j];
+          if (posInfo?.data && posInfo.data.length >= 48) {
+            externalPosition = externalPosition.add(
+              new BN(posInfo.data.subarray(40, 48), "le")
+            );
+            positionPdas.push(pdaMatrix[i][j]);
+          }
         }
+        const positionPda: PublicKey | null = positionPdas[0] ?? null;
 
         const totalValue = actualBalance.add(externalPosition);
 
@@ -103,6 +128,7 @@ export function useStrategies() {
           externalPosition,
           totalValue,
           positionPda,
+          positionPdas,
         } as StrategyData;
       });
 

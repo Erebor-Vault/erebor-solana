@@ -100,6 +100,25 @@ describe("decideAllocation", () => {
     expect(result.action).toBe("NONE");
   });
 
+  // CLOSE_LOOP: orphaned non-leveraged position (supplied > 0, borrowed == 0)
+  // → close it so the next cycle can re-open with proper leverage. This handles
+  // the recovery case where a previous open_loop partially executed.
+  it("closes orphaned non-leveraged position", () => {
+    const portfolio: PortfolioState = {
+      totalValueUsd: 50,
+      idleUsdc: 0,
+      suppliedUsdc: 50_000_000,
+      borrowedUsdc: 0,
+      healthFactor: Infinity,
+    };
+    const loopApys = computeAllLoopApys(goodApys, 1.5, 3.0);
+    const result = decideAllocation(portfolio, loopApys, baseConfig);
+    expect(result.action).toBe("CLOSE_LOOP");
+    if (result.action === "CLOSE_LOOP") {
+      expect(result.reason).toContain("Orphaned");
+    }
+  });
+
   // NONE: position exists, HF healthy → MVP just holds (no leverage rebalancing).
   it("holds existing position when HF healthy", () => {
     const portfolio: PortfolioState = {

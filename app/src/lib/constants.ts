@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 export const PROGRAM_ID = new PublicKey(
-  "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw",
+  "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z",
 );
 
 export const CLUSTERS = {
@@ -49,12 +49,13 @@ export interface VaultEntry {
 
 export const VAULT_REGISTRY: VaultEntry[] = [
   {
-    name: "Lulo agent",
-    tokenMint: new PublicKey("GiAyBPVz4vaEowMGuAuM8HzmPyBg86iruTJdNinX6njg"),
+    name: "Lending vault",
+    tokenMint: new PublicKey("5HLVEnSQeH1dePDMh6sgcbn4mkEMZX9c3fCzqkf194Lp"),
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 0,
   },
+
   // {
   //   name: "Conservative",
   //   tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),

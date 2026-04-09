@@ -172,12 +172,13 @@ sol-vault/
 │       ├── components/          # UI (deposit/withdraw forms, strategy management)
 │       ├── hooks/               # React hooks (useDeposit, useWithdraw, useStrategies...)
 │       └── lib/                 # Constants, PDA helpers, IDL, formatters
-├── agent/                       # AI agent (Claude + Solana Agent Kit)
-│   ├── .env.example             # Agent config template
-│   └── src/                     # Agent source (to be implemented)
+├── agent/                       # AI agents (Claude-powered)
+│   ├── shared/                  # Shared types + vault client
+│   ├── lulo/                    # Lulo lending agent (LULO.md)
+│   └── kamino/                  # Kamino lending agent (planned)
 ├── Anchor.toml                  # Anchor workspace config
 ├── DEPLOYMENT.md                # Deployment info & devnet details
-└── AI_PLAN.md                   # AI agent implementation plan
+└── README.md                    # Project README
 ```
 
 ---
@@ -191,7 +192,7 @@ sol-vault/
 | Tests           | TypeScript + ts-mocha + Chai        | -           |
 | Frontend        | Next.js + React + Tailwind          | 16 / 19 / 4 |
 | Package manager | Bun                                 | -           |
-| AI Agent        | Solana Agent Kit + Anthropic Claude | 2.0         |
+| AI Agent        | Anchor (CPI) + Anthropic Claude SDK | 0.39        |
 
 ---
 
@@ -242,28 +243,29 @@ bun run start
 
 | Param               | Value                                                                                                                      |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Program ID (devnet) | `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B`                                                                             |
+| Program ID (devnet) | `B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z`                                                                             |
 | Upgrade Authority   | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn`                                                                             |
 | Anchor              | 0.32.1                                                                                                                     |
 | Cluster             | devnet (mainnet not yet deployed)                                                                                          |
-| Explorer            | [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet) |
+| Explorer            | [View on Solana Explorer](https://explorer.solana.com/address/B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z?cluster=devnet) |
 
 ---
 
 ## AI Agent Integration
 
-The vault's delegate pattern enables autonomous AI agents to manage strategy funds. An agent's wallet keypair is set as the delegate on a strategy — it receives SPL token spending authority and can autonomously lend funds via Lulo (Solana's lending aggregator routing to Kamino, Drift, MarginFi).
+The vault uses an **action-whitelisting model**: the admin creates a strategy, assigns an agent's keypair as delegate, and whitelists specific (program, instruction) pairs via `add_allowed_action`. The agent never gets SPL spending authority — it calls `execute_strategy_action`, and the vault validates the request against the whitelist and CPIs into the target protocol via `invoke_signed`.
 
 **Flow:**
 
 1. Admin calls `create_strategy(agent_pubkey)` — agent becomes delegate
-2. Authority calls `allocate_to_strategy(amount)` — tokens move to strategy account
-3. Agent detects balance, transfers to own ATA (using delegate authority), lends via Lulo
-4. Agent monitors yields, Claude LLM decides: LEND / WITHDRAW / REBALANCE / HOLD
-5. On withdrawal signal, agent pulls from Lulo and returns tokens to strategy account
-6. Authority calls `deallocate_from_strategy` to move funds back to reserve
+2. Admin calls `add_allowed_action(target_program, discriminator)` — whitelists specific instructions (e.g., Lulo deposit/withdraw)
+3. Authority calls `allocate_to_strategy(amount)` — tokens move to the strategy's PDA-owned token account
+4. Agent monitors balance and yield. Claude decides: LEND / WITHDRAW / HOLD
+5. Agent calls `execute_strategy_action(instruction_data)` — vault validates whitelist, then CPIs into Lulo signed by the vault PDA
+6. On withdrawal signal (file-based), agent pulls funds back from Lulo into the strategy account
+7. Authority calls `deallocate_from_strategy` to return funds to the reserve
 
-See [AI_PLAN.md](AI_PLAN.md) for full implementation details.
+See [agent/lulo/LULO.md](agent/lulo/LULO.md) for the Lulo agent implementation.
 
 ---
 

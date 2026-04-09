@@ -37,12 +37,20 @@ Cargo.lock
 
 *.lock
 
-# Keypairs (secrets)
+# Keypairs & secrets
 *_keypair.json
 *-keypair.json
+*.key
+*.pem
+credentials*.json
+secrets*.json
 
 # Test results
 test-results/
 
 # Images
 *.png
+*.jpg
+*.jpeg
+*.gif
+*.webp

@@ -22,7 +22,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE");
+declare_id!("3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm");
 
 #[program]
 pub mod mock_lulo {
