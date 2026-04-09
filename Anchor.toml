@@ -7,10 +7,14 @@ skip-lint = false
 
 [programs.devnet]
 mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
+mock_kamino = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
+mock_jupiter = "43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7"
 my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
 
 [programs.localnet]
 mock_lulo = "ENccKNWkndfdG16WQY3xchEKGoF3MwXqF5SWueesThXE"
+mock_kamino = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
+mock_jupiter = "43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7"
 my_project = "6GsfdifntcFRQjFjCxsn3KszKd3fucPe5DMrwSpWRPpw"
 
 [programs.mainnet]

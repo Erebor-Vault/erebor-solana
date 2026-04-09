@@ -6,6 +6,9 @@
     "start:lulo": "cd lulo && bun run start",
     "dev:lulo": "cd lulo && bun run dev",
     "test:lulo": "cd lulo && bun run test",
-    "test": "cd lulo && bun run test"
+    "start:kamino": "cd kamino_looper && bun run start",
+    "dev:kamino": "cd kamino_looper && bun run dev",
+    "test:kamino": "cd kamino_looper && bun run test",
+    "test": "cd lulo && bun run test && cd ../kamino_looper && bun run test"
   }
 }
