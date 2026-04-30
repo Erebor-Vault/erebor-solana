@@ -19,7 +19,7 @@ function optionalEnv(name: string, fallback: string): string {
 
 // Erebor vault program ID — must match the declare_id! in lib.rs.
 export const VAULT_PROGRAM_ID = new PublicKey(
-  "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+  "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
 );
 
 export interface KaminoLooperConfig {

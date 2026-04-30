@@ -1,14 +1,58 @@
 # Deployment Info
 
-## Program
+## Programs (devnet, current)
 
-| Param               | Value                                          |
-| ------------------- | ---------------------------------------------- |
-| Program ID          | `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` |
-| Upgrade Authority   | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn` |
-| ProgramData Address | `3XQHs2DA1DSegWEc5SREu6Cqz34m8xab86U7pLz6a8k8` |
-| Anchor Version      | `0.32.1`                                       |
-| Rust Toolchain      | `1.89.0`                                       |
+| Program       | Program ID                                        | Notes                                  |
+| ------------- | ------------------------------------------------- | -------------------------------------- |
+| `my_project`  | `B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z`    | Vault. Anchor 0.32.1, Rust 1.89.0      |
+| `mock_kamino` | `S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK`    | cToken model + obligations/borrow/repay |
+| `mock_lulo`   | `3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm`    | Treasury + per-strategy ProtocolPosition |
+
+| Stale program ID                                | Replaced by                                       |
+| ----------------------------------------------- | ------------------------------------------------- |
+| `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` | `B7EUo8…`  — OLD_Erebor's source `declare_id!`, never deployed; `anchor keys sync` rotated to the existing devnet ID |
+| `HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2` | `S4taBh…`  — OLD_Erebor's source `declare_id!` for mock_kamino, never deployed |
+
+## Path-B port deploy (2026-04-30) — upgrades all 3 programs in place
+
+After completing the path-B port (see [PORT_PROGRESS.md](PORT_PROGRESS.md))
+all 3 programs were redeployed via `anchor deploy --provider.cluster devnet
+--program-name <each>`. Same program IDs reused (the keypairs in
+`target/deploy/` matched the previously-deployed devnet programs after
+`anchor keys sync`), so this is an **upgrade in place**. No IDs burned, no
+rent reclaimed.
+
+| Program       | Tx signature                                                                                                            | IDL data account                                  | Schema impact |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------- |
+| `mock_lulo`   | [`2R2YiSG2…`](https://explorer.solana.com/tx/2R2YiSG2j3MupqbZfjaPTqiMZY2a1SNfm25Vi9poBEfaQu3HeWQbBnNXGaaFiwuTyoBijJJxtjvNi8maMCZJLvyc?cluster=devnet) | `3B36KpZCncdwvxrdM8BJDh1a3T2d4op4P1BtXpYTyRLf`   | None — same code as newArch port |
+| `mock_kamino` | [`3u9wnXnC…`](https://explorer.solana.com/tx/3u9wnXnCj21sdE9PA9vvmiwtUYcqmATYb6vrWbw3867q7mM4tBKTQ8YiSf5BVKB1xJWkd5ZeNL9CChGDa9GEL3h8?cluster=devnet) | `62eKv1mCJt2k1pzFoduKj7Yz7ntsLprtsm2zENe3B25E`   | **Breaking** — was newArch oracle/multi-asset/ProtocolPosition; now OLD_Erebor cToken/single-mint + obligations |
+| `my_project`  | [`2x7jdpGL…`](https://explorer.solana.com/tx/2x7jdpGLDcGMmRNk2exMjRz7pQv7nMFPvPCdHYBMkfZcNh5Zv4enQLhNTka34tUXunoTSkTBjVt3ZXzjdz9VsFQD?cluster=devnet) | `FAf4W4hYgddkZsb7HYis7cDjWswT6T7rvrhiNau6RGpq`   | **Breaking** — was newArch (`execute_strategy_action`, action_id-based AllowedAction); now OLD_Erebor (`execute_action`, deterministic AllowedAction PDA seeds, per-strategy authority PDAs, two-step admin transfer, virtual-shares offset). See PORT_PROGRESS.md |
+
+### Stale on-chain state from before this redeploy
+
+mock_kamino's schema flipped. Any `Reserve` / `Obligation` accounts created
+before this deploy are unreadable by the new program:
+
+- **`Obligation`** seed changed from `["obligation", strategy_token_account]`
+  to `["obligation", reserve, owner]` (owner = `strategy_authority` PDA).
+  New PDAs live at completely different addresses — no collision with old.
+- **`Reserve`** seed is unchanged: `["reserve", liquidity_mint]`. **If you
+  previously initialized a reserve for the same mint, `init_reserve` will
+  fail with "account already exists".** Either init the new strategies
+  against a *fresh* test mint, or close the old reserve via the old admin
+  keypair before re-running setup.
+
+my_project's `AllowedAction` PDA seeds also changed (newArch:
+`[strategy, action_id u16]`; OLD_Erebor: `[strategy, target_program,
+discriminator]`). Old AllowedActions are orphaned at the old seeds; new
+ones land at fresh addresses. Old `StrategyAllocation` accounts share the
+discriminator but the field layout changed (`actionCount` removed,
+`target_weight_bps` + `authority_bump` added). Treat any pre-redeploy
+strategies as stale and recreate fresh ones via the new setup scripts.
+
+The 5 vaults in `app/src/lib/constants.ts` (round-5 USDC mint
+`5BTPntEhZXMK4FTjJe3VqJM1qZZr58ANpWfJQThPRb6N`) likely have orphaned
+strategies + AllowedActions on-chain.
 
 ## Devnet Deployment (Phase-4d — token whitelist, on top of Phase-4b)
 

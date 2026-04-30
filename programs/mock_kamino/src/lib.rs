@@ -27,7 +27,7 @@ use anchor_spl::token_interface::{
     self, Burn, Mint, MintTo, TokenAccount, TokenInterface, TransferChecked,
 };
 
-declare_id!("HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2");
+declare_id!("S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK");
 
 /// Minimum health factor for borrows / withdraws against an obligation
 /// (basis points × 1.0). 10_500 = 1.05 — tight but matches real Kamino's

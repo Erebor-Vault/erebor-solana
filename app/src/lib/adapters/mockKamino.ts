@@ -1,6 +1,6 @@
 /**
  * Mock-Kamino redeem adapter. Targets the in-repo `mock_kamino` program
- * deployed on devnet at `HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2` and
+ * deployed on devnet at `S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK` and
  * mirrors a single-reserve cToken model close enough to real Kamino Lend
  * that the program-side execute_action path is exercised end-to-end.
  *
@@ -24,7 +24,7 @@ import { sha256 } from "@noble/hashes/sha2";
 import type { RedeemAdapter, ProtocolPosition } from "./types";
 
 export const MOCK_KAMINO_PROGRAM_ID = new PublicKey(
-  "HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2",
+  "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK",
 );
 
 /** Anchor discriminator: sha256("global:withdraw_obligation_collateral_and_redeem_reserve_collateral")[..8]. */

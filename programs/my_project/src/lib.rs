@@ -22,7 +22,7 @@ pub use events::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B");
+declare_id!("B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z");
 
 #[program]
 pub mod my_project {

@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/my_project.json`.
  */
 export type MyProject = {
-  "address": "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B",
+  "address": "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z",
   "metadata": {
     "name": "myProject",
     "version": "0.1.0",
