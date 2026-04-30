@@ -54,3 +54,5 @@ test-results/
 *.jpeg
 *.gif
 *.webp
+.playwright-mcp/
+Erebor__The_AI_Agent_Vault.mp4

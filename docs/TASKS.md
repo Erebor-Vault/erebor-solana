@@ -100,7 +100,7 @@ Roles:
 | [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) | Original spec (partly aspirational) |
 | [MISMATCHES.md](MISMATCHES.md) | Where current code drifts from the spec |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Live devnet program + per-vault PDA derivations |
-| [CLAUDE.md](CLAUDE.md) | Contributor guide (commands + invariants) |
+| [CLAUDE.md](../CLAUDE.md) | Contributor guide (commands + invariants) |
 | [FRONTEND.md](FRONTEND.md) | Current dashboard implementation |
 | [FRONTEND_PLAN.md](FRONTEND_PLAN.md) | Forward-looking frontend roadmap |
 | [AI_PLAN.md](AI_PLAN.md) | AI agent design |

@@ -6,7 +6,7 @@ import type { StrategyData } from "@/hooks/useStrategies";
  * Value-source editor — placeholder shape only.
  *
  * Why disabled: the program does not yet expose `add_value_source` /
- * `remove_value_source` or a `ValueSource` PDA. Once shipped (SOLANA_VAULT_SPEC.md §8),
+ * `remove_value_source` or a `ValueSource` PDA. Once shipped (docs/SOLANA_VAULT_SPEC.md §8),
  * each strategy will register N value sources that contribute to its NAV
  * calculation:
  *   - `SplAtaBalance` — read a token-account balance
@@ -15,7 +15,7 @@ import type { StrategyData } from "@/hooks/useStrategies";
  *
  * `compute_total_assets` would aggregate them so off-chain code (and a
  * future `report_yield`-replacement) can resolve NAV without trusting the
- * agent. See MISMATCHES.md §2.1.
+ * agent. See docs/MISMATCHES.md §2.1.
  */
 const KIND_OPTIONS = [
   { value: "SplAtaBalance", label: "SPL ATA balance (read a token account)" },
@@ -42,8 +42,8 @@ export function ValueSourceEditor({ strategy }: { strategy: StrategyData }) {
           Blocked on <code>ValueSource</code> PDAs +{" "}
           <code>add_value_source</code> / <code>remove_value_source</code>.
           Today share price comes from <code>report_yield</code>{" "}
-          (admin-pushed), not from on-chain NAV. See MISMATCHES.md §2.1 and
-          <code> SOLANA_VAULT_SPEC.md</code> §8.
+          (admin-pushed), not from on-chain NAV. See docs/MISMATCHES.md §2.1 and
+          <code> docs/SOLANA_VAULT_SPEC.md</code> §8.
         </p>
       </div>
 

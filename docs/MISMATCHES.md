@@ -31,7 +31,7 @@ trail.
 
 | File                            | Theme of original draft                                                                                                  | Actual repo                                                                                                | Status                                                                                                              |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| [CLAUDE.md](CLAUDE.md)          | Solidity 0.8.27, Foundry, `forge build`, `frontend/` next.js with wagmi/viem/RainbowKit, pnpm, `src/Vault.sol`, `lib/`. | Anchor 0.32.1 program at [programs/my_project/](programs/my_project/), [app/](app/), bun, no Solidity. | Rewritten in this round.                                                                                            |
+| [CLAUDE.md](../CLAUDE.md)          | Solidity 0.8.27, Foundry, `forge build`, `frontend/` next.js with wagmi/viem/RainbowKit, pnpm, `src/Vault.sol`, `lib/`. | Anchor 0.32.1 program at [programs/my_project/](programs/my_project/), [app/](app/), bun, no Solidity. | Rewritten in this round.                                                                                            |
 | [OVERVIEW.md](OVERVIEW.md)      | ERC-4626 vault + EIP-1167 minimal-proxy strategy clones, OpenZeppelin AccessControl, Mock Aave V3 + YieldDripper.        | SPL token vault PDA + per-strategy PDA, admin/authority `Pubkey` fields, `simulate-yield.ts` keeper.       | Rewritten in this round. Cross-network references remain in the §2 mapping table only.                              |
 | [FRONTEND.md](FRONTEND.md)      | wagmi v2 + viem + RainbowKit Next.js 14, server-side `/api/rpc/[chain]/route.ts` proxy, hooks like `useStrategyAllowedActionsLogs`, `useAllowance`, `useRoles`; components like `AdminPanel.tsx`, `WeightSlider.tsx`, `StrategyTable.tsx`. | `@solana/wallet-adapter-react` + `@coral-xyz/anchor`, no proxy, hooks `useDeposit`/`useWithdraw`/`useStrategies`/`useAdminActions`/`useAuthorityActions`, components `AdminGuard`/`StrategyCard`/`AllocationChart`. | Rewritten in this round. None of the files referenced in the original draft existed in [app/src/](app/src/).       |
 | [FRONTEND_PLAN.md](FRONTEND_PLAN.md) | Roadmap for the EVM dashboard (Playwright e2e on RainbowKit, log replay for `AllowedActionAdded` events, Base mainnet wiring). | Solana app — log replay irrelevant; the equivalent is multi-cluster, not multi-chain.                      | Rewritten in this round.                                                                                            |
@@ -249,7 +249,7 @@ describes the eventual two-step Lulo flow that will replace the mock.
 
 The repo's root-level docs are Solana-themed and broadly accurate:
 
-- [README.md](README.md) — lists 10 instructions that match
+- [README.md](../README.md) — lists 10 instructions that match
   [lib.rs](programs/my_project/src/lib.rs) exactly, plus a
   documentation index. ✅
 - [OVERVIEW.md](OVERVIEW.md) — high-level explainer (this file's §1
@@ -260,11 +260,11 @@ The repo's root-level docs are Solana-themed and broadly accurate:
   `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` matches
   [Anchor.toml](Anchor.toml). ✅
 - [AI_PLAN.md](AI_PLAN.md) — design for the unbuilt agent.
-- [CLAUDE.md](CLAUDE.md) — the rewritten long-form contributor guide
+- [CLAUDE.md](../CLAUDE.md) — the rewritten long-form contributor guide
   (this file's §1 documents what it replaced).
 
 The canonical documentation is now the root-level set listed in
-[README.md](README.md)'s "Documentation index". The original
+[README.md](../README.md)'s "Documentation index". The original
 `new-docs/` folder was a transitional scratchpad and has been removed
 in this round.
 

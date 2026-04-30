@@ -6,7 +6,7 @@
 //
 // Agent-specific decision/monitor/config types are kept here for now while
 // lulo still imports them; they'll move to agent/lulo/src/types.ts in step
-// 5c (PORT_PROGRESS.md).
+// 5c (docs/PORT_PROGRESS.md).
 
 import { PublicKey } from "@solana/web3.js";
 import type { Keypair } from "@solana/web3.js";

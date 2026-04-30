@@ -348,7 +348,7 @@ Track these in a project board; the program-side equivalent lives in
   architecture decisions (section 14 covers the dashboard).
 - [OVERVIEW.md](OVERVIEW.md) — high-level explainer, including the
   intended `execute_action` flow.
-- [CLAUDE.md](CLAUDE.md) — contributor guide.
+- [CLAUDE.md](../CLAUDE.md) — contributor guide.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — addresses to seed
   `VAULT_REGISTRY` against.
 - [AI_PLAN.md](AI_PLAN.md) — AI agent design (the off-chain

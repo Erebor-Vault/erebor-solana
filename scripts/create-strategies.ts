@@ -193,7 +193,7 @@ async function main() {
     );
   }
 
-  console.log("\n--- Markdown for DEPLOYMENT.md ---\n");
+  console.log("\n--- Markdown for docs/DEPLOYMENT.md ---\n");
   console.log("## Devnet Strategies\n");
   console.log("| # | Name | Delegate (AI Agent Wallet) | Weight | Strategy PDA | Token Account |");
   console.log("|---|------|---------------------------|--------|--------------|---------------|");

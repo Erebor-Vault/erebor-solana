@@ -7,7 +7,7 @@
 > spec-vs-code gaps see [MISMATCHES.md](MISMATCHES.md). For program
 > background see [OVERVIEW.md](OVERVIEW.md) +
 > [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md). For contributor
-> guidance see [CLAUDE.md](CLAUDE.md).
+> guidance see [CLAUDE.md](../CLAUDE.md).
 
 ---
 

@@ -724,11 +724,11 @@ fallback).
   partly aspirational, cross-check with [MISMATCHES.md](MISMATCHES.md).
 - [MISMATCHES.md](MISMATCHES.md) — every place the spec drifts from
   the code.
-- [CLAUDE.md](CLAUDE.md) — contributor guide (commands + invariants).
+- [CLAUDE.md](../CLAUDE.md) — contributor guide (commands + invariants).
 - [FRONTEND.md](FRONTEND.md) — current dashboard implementation.
 - [FRONTEND_PLAN.md](FRONTEND_PLAN.md) — frontend roadmap + open
   questions.
-- [README.md](README.md) — terse user-facing intro.
+- [README.md](../README.md) — terse user-facing intro.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — live devnet program + per-vault
   PDA derivations.
 - [AI_PLAN.md](AI_PLAN.md) — AI agent design.

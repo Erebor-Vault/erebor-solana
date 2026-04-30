@@ -9,7 +9,7 @@ export function StrategyList() {
 
   // Sum of weights across active strategies. The program does NOT cap this
   // (each strategy individually capped at 10 000 bps; aggregate intentionally
-  // unenforced — see SOLANA_VAULT_SPEC.md §15 / MISMATCHES.md §2.2). Surface
+  // unenforced — see docs/SOLANA_VAULT_SPEC.md §15 / docs/MISMATCHES.md §2.2). Surface
   // the running total so admins can see the residual reserve buffer or notice
   // an over-allocation before they trigger a rebalance.
   const activeSumBps = useMemo(

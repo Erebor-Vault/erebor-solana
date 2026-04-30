@@ -27,7 +27,7 @@
  *   - Agent attempts to siphon: relayed instruction routes destination
  *     to agent's own ATA → reverts with `AntiTheft`
  *
- * STATUS: requires REFACTOR_PLAN.md to be applied first. Specifically the
+ * STATUS: requires docs/REFACTOR_PLAN.md to be applied first. Specifically the
  * test depends on:
  *   - Per-strategy `strategy_authority` PDA owning the strategy ATA
  *   - `execute_action` signing as `strategy_authority` (not vault_state)

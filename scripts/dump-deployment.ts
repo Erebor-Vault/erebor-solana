@@ -1,6 +1,6 @@
 /**
  * dump-deployment.ts — print deterministic addresses for each vault in the
- * registry so DEPLOYMENT.md can be regenerated. Read-only, no on-chain
+ * registry so docs/DEPLOYMENT.md can be regenerated. Read-only, no on-chain
  * mutation; just derives PDAs and reads VaultState + Strategy accounts.
  */
 

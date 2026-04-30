@@ -8,11 +8,11 @@ import type { StrategyData } from "@/hooks/useStrategies";
  * Why disabled: the program does not yet expose
  * `set_deposit_config` / `set_withdraw_config` instructions or the
  * underlying `AutoActionConfig` PDA. Once the spec's auto-rebalance lands
- * (SOLANA_VAULT_SPEC.md §10), each strategy gets a `deposit_config` and
+ * (docs/SOLANA_VAULT_SPEC.md §10), each strategy gets a `deposit_config` and
  * `withdraw_config` describing the AllowedAction the vault should
  * automatically invoke as funds flow in / out.
  *
- * See MISMATCHES.md §2.1.
+ * See docs/MISMATCHES.md §2.1.
  */
 export function AutoActionConfigEditor({ strategy }: { strategy: StrategyData }) {
   return (
@@ -32,7 +32,7 @@ export function AutoActionConfigEditor({ strategy }: { strategy: StrategyData })
         <p className="font-semibold">Not shipped yet — Phase 2 program work</p>
         <p className="mt-1 text-[var(--color-warning)]/80">
           Blocked on auto-rebalance + <code>AutoActionConfig</code> PDAs. See
-          MISMATCHES.md §2.1 / §2.8 and <code>SOLANA_VAULT_SPEC.md</code> §10.
+          docs/MISMATCHES.md §2.1 / §2.8 and <code>docs/SOLANA_VAULT_SPEC.md</code> §10.
         </p>
       </div>
 

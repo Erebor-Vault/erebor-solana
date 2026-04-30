@@ -10,7 +10,7 @@ co-located:
 - **Anchor program** at [programs/my_project/](programs/my_project/) — `src/lib.rs`, `Cargo.toml`. Single program crate.
 - **Tests** at [tests/my_project.ts](tests/my_project.ts) — TypeScript integration tests with ts-mocha + chai, using the Anchor IDL types regenerated from `target/types/` after every `anchor build`.
 - **Frontend** at [app/](app/) — Next.js 16.2.1 (App Router), React 19, TypeScript, Tailwind 4, `@solana/wallet-adapter-react`, `@coral-xyz/anchor`. Separate `package.json`.
-- **Agent scaffold** at [agent/](agent/) — `solana-agent-kit` + `@anthropic-ai/sdk`. `src/` is **not yet implemented**; only `package.json` + `tsconfig.json`. See [AI_PLAN.md](AI_PLAN.md).
+- **Agent scaffold** at [agent/](agent/) — `solana-agent-kit` + `@anthropic-ai/sdk`. `src/` is **not yet implemented**; only `package.json` + `tsconfig.json`. See [docs/AI_PLAN.md](docs/AI_PLAN.md).
 - **Scripts** at [scripts/](scripts/) — TS scripts that drive deploy / vault init / strategy creation / yield simulation against devnet (or local validator).
 - **Migrations** at [migrations/deploy.ts](migrations/deploy.ts) — Anchor deploy stub (empty body — real deploys go through [scripts/deploy.sh](scripts/deploy.sh) and the `init-vault.ts` family).
 - **Anchor config** at [Anchor.toml](Anchor.toml), workspace at [Cargo.toml](Cargo.toml). Program id pinned to `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` on devnet, localnet, and mainnet.
@@ -18,14 +18,14 @@ co-located:
 Spec, deployment, and design context worth reading before changing
 behavior (in roughly this order):
 
-- [OVERVIEW.md](OVERVIEW.md) — high-level pitch + architecture explainer (start here if you're new).
-- [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) — original build spec; aspirational. Cross-check with…
-- [MISMATCHES.md](MISMATCHES.md) — every place the spec diverges from what's actually shipped today.
-- [FRONTEND.md](FRONTEND.md) — current snapshot of the dashboard.
-- [FRONTEND_PLAN.md](FRONTEND_PLAN.md) — forward-looking frontend roadmap + open questions.
-- [DEPLOYMENT.md](DEPLOYMENT.md) — live devnet program + per-vault PDA derivations.
-- [AI_PLAN.md](AI_PLAN.md) — the AI agent's intended design.
-- [PLAN.md](PLAN.md) — historical implementation checklist (some items remain open; see MISMATCHES.md for current state).
+- [docs/OVERVIEW.md](docs/OVERVIEW.md) — high-level pitch + architecture explainer (start here if you're new).
+- [docs/SOLANA_VAULT_SPEC.md](docs/SOLANA_VAULT_SPEC.md) — original build spec; aspirational. Cross-check with…
+- [docs/MISMATCHES.md](docs/MISMATCHES.md) — every place the spec diverges from what's actually shipped today.
+- [docs/FRONTEND.md](docs/FRONTEND.md) — current snapshot of the dashboard.
+- [docs/FRONTEND_PLAN.md](docs/FRONTEND_PLAN.md) — forward-looking frontend roadmap + open questions.
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — live devnet program + per-vault PDA derivations.
+- [docs/AI_PLAN.md](docs/AI_PLAN.md) — the AI agent's intended design.
+- [docs/PLAN.md](docs/PLAN.md) — historical implementation checklist (some items remain open; see docs/MISMATCHES.md for current state).
 
 ## Common commands
 
@@ -90,7 +90,7 @@ bun install
 bun run start            # tsx src/index.ts — currently fails: src/ is empty
 ```
 
-The agent is a scaffold. See [AI_PLAN.md](AI_PLAN.md) for the
+The agent is a scaffold. See [docs/AI_PLAN.md](docs/AI_PLAN.md) for the
 intended design.
 
 ## Architecture
@@ -152,7 +152,7 @@ Critical consequences for any change:
    pre/post snapshot of *both* caller's ATA and `strategy.delegate`'s
    ATA — anti-theft fires if either grows. Sibling-instruction
    introspection (instruction sysvar walking) is still deferred — see
-   [MISMATCHES.md §2.3](MISMATCHES.md).
+   [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md).
 4. **Two-step admin / authority transfer.** `propose_admin` +
    `accept_admin` (and `_authority` analogues). Until the recipient
    accepts from their own keypair, the live admin/authority field is
@@ -275,7 +275,7 @@ cronjob).
    seeds. Inside the metas, mark `strategy_authority` as a signer.
 7. Reload both ATAs; revert with `AntiTheft` if either grew.
 
-What's still **deferred** (see [MISMATCHES.md §2.3](MISMATCHES.md)):
+What's still **deferred** (see [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md)):
 sibling-instruction introspection via the instructions sysvar. The
 balance snapshot catches direct siphons but not multi-instruction
 attacks where the agent stages a Token::transfer in a sibling ix.
@@ -299,8 +299,8 @@ attacks where the agent stages a Token::transfer in a sibling ix.
   wraps the entire `/admin` route; if `publicKey` is not the vault's
   admin or authority, the whole page renders a "Not authorized"
   banner instead. The spec's "disable-not-hide" pattern is a roadmap
-  item — see [FRONTEND.md](FRONTEND.md) and
-  [MISMATCHES.md §3](MISMATCHES.md).
+  item — see [docs/FRONTEND.md](docs/FRONTEND.md) and
+  [docs/MISMATCHES.md §3](docs/MISMATCHES.md).
 - **Two routes today.** `/`
   ([app/src/app/page.tsx](app/src/app/page.tsx)) is the user
   dashboard (vault list + stats + deposit/withdraw + allocation pie +
@@ -311,7 +311,7 @@ attacks where the agent stages a Token::transfer in a sibling ix.
   routes are not yet implemented; the active vault is held in the
   `VaultProvider` context.
 - **No activity feed.** Blocked on the program adding `#[event]`
-  emissions — see [MISMATCHES.md §2.5](MISMATCHES.md).
+  emissions — see [docs/MISMATCHES.md §2.5](docs/MISMATCHES.md).
 
 ## Test conventions
 
@@ -331,25 +331,25 @@ attacks where the agent stages a Token::transfer in a sibling ix.
 
 ## Things the spec says but the code does NOT do
 
-[SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) is the original build
+[docs/SOLANA_VAULT_SPEC.md](docs/SOLANA_VAULT_SPEC.md) is the original build
 spec; it is partly aspirational. Verify before relying on it. The
-authoritative gap list is [MISMATCHES.md](MISMATCHES.md). Highlights
+authoritative gap list is [docs/MISMATCHES.md](docs/MISMATCHES.md). Highlights
 that remain *open* after the Phase-3 refactor:
 
 - **No instruction-sysvar introspection in `execute_action`** (audit
   #7, deferred). Sibling-instruction attacks aren't caught — the
   balance-snapshot anti-theft only sees the inner CPI.
-  [MISMATCHES.md §2.3](MISMATCHES.md).
+  [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md).
 - **No auto-rebalance on deposit/withdraw.** Deposits sit in the
   reserve; withdrawals revert when the reserve can't cover. Authority
-  must manually rebalance first. [MISMATCHES.md §2.8](MISMATCHES.md).
+  must manually rebalance first. [docs/MISMATCHES.md §2.8](docs/MISMATCHES.md).
 - **`report_yield` is extra**, not in spec — the spec wants NAV
-  computed live from value-source CPIs. [MISMATCHES.md §2.2](MISMATCHES.md).
-- **Agent `src/` is empty.** [MISMATCHES.md §4](MISMATCHES.md).
+  computed live from value-source CPIs. [docs/MISMATCHES.md §2.2](docs/MISMATCHES.md).
+- **Agent `src/` is empty.** [docs/MISMATCHES.md §4](docs/MISMATCHES.md).
 - **No `ValueSource` / `AutoActionConfig` accounts yet.** The
   `AllowedAction` PDA is built; its sister registries are not.
 
-Closed by the Phase-3 refactor (see [REFACTOR_PLAN.md](REFACTOR_PLAN.md)):
+Closed by the Phase-3 refactor (see [docs/REFACTOR_PLAN.md](docs/REFACTOR_PLAN.md)):
 
 - ✅ **Per-strategy authority PDAs.** `vault_authority` and
   `strategy_authority[i]` replace `vault_state` as CPI signers.

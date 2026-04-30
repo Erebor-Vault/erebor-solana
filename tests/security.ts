@@ -11,7 +11,7 @@
 //      `allocate_to_strategy` role check, `deallocate_from_strategy` pause check.
 //
 // Plus inline `assertAllInvariants(...)` calls anchor each mutating test to
-// the invariant table from TEST_PLAN.md.
+// the invariant table from docs/TEST_PLAN.md.
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program, AnchorError } from "@coral-xyz/anchor";

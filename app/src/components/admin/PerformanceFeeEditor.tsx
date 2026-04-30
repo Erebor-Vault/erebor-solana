@@ -12,7 +12,7 @@ const MAX_BPS = 2000;
 /**
  * Admin-only performance fee editor. Lets the admin change the per-vault
  * `performance_fee_bps` within the program's hard cap (20%). Disable-not-hide:
- * non-admins see the slider but can't move it. See OVERVIEW.md §11.
+ * non-admins see the slider but can't move it. See docs/OVERVIEW.md §11.
  */
 export function PerformanceFeeEditor() {
   const { vault } = useVault();
@@ -63,7 +63,7 @@ export function PerformanceFeeEditor() {
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">
           Charged at <code>withdraw</code> time on the redeemed amount; routed
           to the admin&apos;s ATA. Default 500 bps (5%); cap {MAX_BPS} bps (20%).
-          See OVERVIEW.md §11.
+          See docs/OVERVIEW.md §11.
         </p>
       </header>
 

@@ -2,7 +2,7 @@
 // `assertAllInvariants(ctx)` from any test that mutates state — every
 // reachable state must satisfy these properties.
 //
-// See TEST_PLAN.md §"Invariants to verify after every mutation" for the
+// See docs/TEST_PLAN.md §"Invariants to verify after every mutation" for the
 // rationale behind each one.
 
 import * as anchor from "@coral-xyz/anchor";

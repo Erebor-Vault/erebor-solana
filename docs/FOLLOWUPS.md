@@ -352,7 +352,7 @@ scaffold in `agent/package.json` exists.
   deferred. After C1, update or close that row.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — keep refreshing the "current"
   section after every devnet upgrade.
-- [CLAUDE.md](CLAUDE.md) — Phase 4d's token allow-list isn't
+- [CLAUDE.md](../CLAUDE.md) — Phase 4d's token allow-list isn't
   mentioned. Add a short paragraph under "Architecture".
 - [REFACTOR_PLAN.md](REFACTOR_PLAN.md) — historical, leave alone.
 
@@ -361,7 +361,7 @@ scaffold in `agent/package.json` exists.
 ## How to resume
 
 If you're a fresh Claude session: read this file, then
-[CLAUDE.md](CLAUDE.md), then ask the user which item to start with.
+[CLAUDE.md](../CLAUDE.md), then ask the user which item to start with.
 Don't try to do all of B + C + D in one turn — each is a multi-commit
 workstream.
 

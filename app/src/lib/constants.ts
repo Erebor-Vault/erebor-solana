@@ -49,7 +49,7 @@ export interface VaultEntry {
 
 // Path-B port test mint (created by setup-lulo-strategy.ts on the
 // 2026-04-30 redeploy). Pre-refactor mints (HgctyjCk…, J1qLR4P2…,
-// BZwn5e9G…, 45AbULTJ…, 5BTPntEhZ…) are orphaned — see DEPLOYMENT.md.
+// BZwn5e9G…, 45AbULTJ…, 5BTPntEhZ…) are orphaned — see docs/DEPLOYMENT.md.
 const TEST_USDC_MINT = new PublicKey(
   "HEYo4Z5KDtfLFGW51xoQW3MFFEGLdfgkQRrpX2Dm4Chi"
 );

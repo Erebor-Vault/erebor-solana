@@ -16,21 +16,21 @@ Think of it as an ERC-4626-style vault designed specifically for AI agent strate
 
 The structured spec set lives at the repo root. Read in this order:
 
-1. [OVERVIEW.md](OVERVIEW.md) — high-level pitch + architecture
+1. [docs/OVERVIEW.md](docs/OVERVIEW.md) — high-level pitch + architecture
    explainer.
-2. [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) — build spec (partly
+2. [docs/SOLANA_VAULT_SPEC.md](docs/SOLANA_VAULT_SPEC.md) — build spec (partly
    aspirational; see status section at the top).
 3. [CLAUDE.md](CLAUDE.md) — contributor guide (commands +
    invariants).
-4. [FRONTEND.md](FRONTEND.md) — current dashboard snapshot.
-5. [FRONTEND_PLAN.md](FRONTEND_PLAN.md) — forward-looking frontend
+4. [docs/FRONTEND.md](docs/FRONTEND.md) — current dashboard snapshot.
+5. [docs/FRONTEND_PLAN.md](docs/FRONTEND_PLAN.md) — forward-looking frontend
    roadmap.
-6. [MISMATCHES.md](MISMATCHES.md) — every place the spec diverges
+6. [docs/MISMATCHES.md](docs/MISMATCHES.md) — every place the spec diverges
    from what's actually shipped today.
 
-Other top-level docs: [PLAN.md](PLAN.md) (historical implementation
-checklist), [AI_PLAN.md](AI_PLAN.md) (AI agent design),
-[DEPLOYMENT.md](DEPLOYMENT.md) (live program + per-vault PDAs).
+Other top-level docs: [docs/PLAN.md](docs/PLAN.md) (historical implementation
+checklist), [docs/AI_PLAN.md](docs/AI_PLAN.md) (AI agent design),
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (live program + per-vault PDAs).
 
 ## The problem
 
