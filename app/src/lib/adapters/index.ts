@@ -12,13 +12,18 @@
 
 import type { RedeemAdapter, ProtocolPosition } from "./types";
 import { mockKaminoAdapter } from "./mockKamino";
+import { mockLuloAdapter } from "./mockLulo";
 import { jupiterAdapter } from "./jupiter";
 
-export const ADAPTERS: RedeemAdapter[] = [mockKaminoAdapter, jupiterAdapter];
+export const ADAPTERS: RedeemAdapter[] = [
+  mockKaminoAdapter,
+  mockLuloAdapter,
+  jupiterAdapter,
+];
 
 export function adapterById(id: string): RedeemAdapter | null {
   return ADAPTERS.find((a) => a.id === id) ?? null;
 }
 
 export type { RedeemAdapter, ProtocolPosition };
-export { mockKaminoAdapter, jupiterAdapter };
+export { mockKaminoAdapter, mockLuloAdapter, jupiterAdapter };

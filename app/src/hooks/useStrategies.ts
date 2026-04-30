@@ -17,6 +17,11 @@ export interface StrategyData {
   isActive: boolean;
   targetWeightBps: number;
   actualBalance: BN;
+  // strategy_authority[i] PDA — owns the strategy ATA + signs CPIs inside
+  // execute_action. Derived from ["strategy_authority", vault, strategy_id LE].
+  // Surfaced here so adapters can read protocol-side accounts (cToken ATA,
+  // obligation, etc.) without re-deriving it themselves.
+  strategyAuthority: PublicKey;
 }
 
 export function useStrategies() {
@@ -59,16 +64,27 @@ export function useStrategies() {
           actualBalance = new BN(info.data.subarray(64, 72), "le");
         }
 
+        const strategyId: BN = acc.account.strategyId;
+        const [strategyAuthority] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from("strategy_authority"),
+            (acc.account.vault as PublicKey).toBuffer(),
+            strategyId.toArrayLike(Buffer, "le", 8),
+          ],
+          program.programId
+        );
+
         return {
           publicKey: acc.publicKey,
           vault: acc.account.vault,
-          strategyId: acc.account.strategyId,
+          strategyId,
           delegate: acc.account.delegate,
           allocatedAmount: acc.account.allocatedAmount,
           tokenAccount: acc.account.tokenAccount,
           isActive: acc.account.isActive,
           targetWeightBps: acc.account.targetWeightBps ?? 0,
           actualBalance,
+          strategyAuthority,
         } as StrategyData;
       });
 

@@ -52,6 +52,19 @@ function deriveCollateralMintPda(liquidityMint: PublicKey): PublicKey {
   return pda;
 }
 
+// Per-(reserve, owner) borrow PDA. Owner here is the strategy_authority PDA
+// (the only signer mock_kamino's borrow_obligation_liquidity accepts).
+function deriveObligationPda(
+  reservePda: PublicKey,
+  owner: PublicKey,
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("obligation"), reservePda.toBuffer(), owner.toBuffer()],
+    MOCK_KAMINO_PROGRAM_ID,
+  );
+  return pda;
+}
+
 export const mockKaminoAdapter: RedeemAdapter = {
   id: "mock-kamino",
   label: "Mock Kamino · USDC reserve",
@@ -61,25 +74,21 @@ export const mockKaminoAdapter: RedeemAdapter = {
   async readPosition({ connection, strategy, underlyingMint }): Promise<ProtocolPosition | null> {
     const reservePda = deriveReservePda(underlyingMint);
     const collateralMint = deriveCollateralMintPda(underlyingMint);
+    const obligationPda = deriveObligationPda(reservePda, strategy.strategyAuthority);
 
-    // Strategy's cToken ATA (off-curve, owned by strategy_authority).
+    // Strategy's cToken ATA — owned by strategy_authority[i] because that's
+    // the signer authority on every mock_kamino deposit/withdraw/borrow/repay.
     const strategyCollateralAta = getAssociatedTokenAddressSync(
       collateralMint,
-      // Reserve note: the strategy ATA owner here is `strategy.tokenAccount`'s
-      // owner — i.e. `strategy_authority[i]`. We can derive it from
-      // strategy.publicKey + the program but it's simpler to read from
-      // strategy.tokenAccount metadata. For correctness against the e2e flow,
-      // we use the strategy_authority PDA owner of the strategy_token_account.
-      // Since `useStrategies` doesn't surface strategy_authority directly, we
-      // compute it here off the strategy id.
-      strategy.publicKey, // placeholder; the real owner is strategy_authority
+      strategy.strategyAuthority,
       true,
     );
 
-    // Read the cToken ATA balance and reserve totals.
-    const [collateralAcct, reserveAcct] = await Promise.all([
+    // Read cToken ATA, reserve totals, and obligation in parallel.
+    const [collateralAcct, reserveAcct, obligationAcct] = await Promise.all([
       connection.getAccountInfo(strategyCollateralAta),
       connection.getAccountInfo(reservePda),
+      connection.getAccountInfo(obligationPda),
     ]);
     if (!collateralAcct || !reserveAcct) return null;
 
@@ -87,14 +96,41 @@ export const mockKaminoAdapter: RedeemAdapter = {
     const collateralBalance = new BN(collateralAcct.data.slice(64, 72), "le");
     if (collateralBalance.isZero()) return null;
 
+    // Obligation layout (after 8-byte discriminator):
+    //   reserve(32) owner(32) borrowed_liquidity(8) bump(1)
+    // If the obligation has outstanding debt, redeeming naïvely would either
+    // fail HF or leave the position underwater. The orchestrator can't safely
+    // unwind a loop in a single redeem ix — that needs withdraw → repay →
+    // withdraw via the agent's close-loop flow. Surface 0 here so the
+    // orchestrator falls through; authority must close loops first.
+    let borrowedLiquidity = new BN(0);
+    if (obligationAcct && obligationAcct.data.length >= 80) {
+      borrowedLiquidity = new BN(obligationAcct.data.slice(8 + 64, 8 + 72), "le");
+    }
+
     // Reserve layout (after 8-byte Anchor discriminator):
     //   admin(32) liquidity_mint(32) collateral_mint(32) liquidity_supply(32)
-    //   total_liquidity(8) total_collateral_supply(8) bump(1) collateral_mint_bump(1)
+    //   total_liquidity(8) total_collateral_supply(8) total_borrowed(8)
+    //   bump(1) collateral_mint_bump(1)
     const reserveData = reserveAcct.data;
     const totalLiquidity = new BN(reserveData.slice(8 + 128, 8 + 136), "le");
     const totalCollateral = new BN(reserveData.slice(8 + 136, 8 + 144), "le");
 
-    // underlyingAvailable = collateralBalance × totalLiquidity / totalCollateral.
+    if (!borrowedLiquidity.isZero()) {
+      return {
+        label: this.label,
+        underlyingAvailable: new BN(0),
+        raw: {
+          reservePda: reservePda.toBase58(),
+          obligationPda: obligationPda.toBase58(),
+          borrowedLiquidity: borrowedLiquidity.toString(),
+          collateralBalance: collateralBalance.toString(),
+          note: "outstanding debt — close loop first",
+        },
+      };
+    }
+
+    // No debt: underlyingAvailable = collateralBalance × totalLiquidity / totalCollateral.
     const underlyingAvailable = totalCollateral.isZero()
       ? collateralBalance
       : collateralBalance.mul(totalLiquidity).div(totalCollateral);
