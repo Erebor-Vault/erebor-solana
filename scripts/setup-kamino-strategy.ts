@@ -43,11 +43,13 @@ import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   createMint,
   createAssociatedTokenAccount,
+  createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddressSync,
   mintTo,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
+import { Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 import BN from "bn.js";
 import * as fs from "fs";
 import bs58 from "bs58";
@@ -311,6 +313,29 @@ async function main() {
       .rpc();
     console.log(`   Obligation PDA: ${obligationPda.toBase58()}`);
   }
+
+  // Create the strategy's cToken ATA — owned by strategy_authority (off-curve).
+  // mock_kamino's deposit handler mints cTokens here; if the ATA doesn't exist,
+  // mint_to fails with "Attempt to debit an account but found no record of a
+  // prior credit". The high-level createAssociatedTokenAccount helper rejects
+  // off-curve owners, so we build the ix manually.
+  const strategyCollateralAta = getAssociatedTokenAddressSync(
+    collateralMintPda,
+    strategyAuthorityPda,
+    true
+  );
+  if (await accountExists(connection, strategyCollateralAta)) {
+    console.log(`   Strategy cToken ATA already exists at ${strategyCollateralAta.toBase58()}`);
+  } else {
+    const ataIx = createAssociatedTokenAccountInstruction(
+      payer.publicKey,
+      strategyCollateralAta,
+      strategyAuthorityPda,
+      collateralMintPda
+    );
+    await sendAndConfirmTransaction(connection, new Transaction().add(ataIx), [payer]);
+    console.log(`   Strategy cToken ATA: ${strategyCollateralAta.toBase58()}`);
+  }
   console.log();
 
   // ── Step 6: Whitelist 4 mock_kamino actions ───────────────────────────
@@ -428,7 +453,7 @@ async function main() {
   console.log(`USDC_SUPPLY_APY_BPS=600`);
   console.log(`USDC_BORROW_APY_BPS=400`);
   console.log(`DRY_RUN=false`);
-  console.log("\nAgent USDC ATA must be funded with a small amount of SOL for tx fees:");
+  console.log("\n⚠ The agent wallet has 0 SOL — fund it for tx fees BEFORE running the agent:");
   console.log(`  solana transfer ${delegateKeypair.publicKey.toBase58()} 0.1 --allow-unfunded-recipient\n`);
 }
 

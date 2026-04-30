@@ -47,11 +47,11 @@ export interface VaultEntry {
   vaultId: number;
 }
 
-// Phase-3 round-5 test mint (post per-strategy-authority refactor).
-// Pre-refactor mints (HgctyjCk…, J1qLR4P2…, BZwn5e9G…, 45AbULTJ…) are
-// orphaned — see DEPLOYMENT.md.
+// Path-B port test mint (created by setup-lulo-strategy.ts on the
+// 2026-04-30 redeploy). Pre-refactor mints (HgctyjCk…, J1qLR4P2…,
+// BZwn5e9G…, 45AbULTJ…, 5BTPntEhZ…) are orphaned — see DEPLOYMENT.md.
 const TEST_USDC_MINT = new PublicKey(
-  "5BTPntEhZXMK4FTjJe3VqJM1qZZr58ANpWfJQThPRb6N"
+  "HEYo4Z5KDtfLFGW51xoQW3MFFEGLdfgkQRrpX2Dm4Chi"
 );
 
 export const VAULT_REGISTRY: VaultEntry[] = [

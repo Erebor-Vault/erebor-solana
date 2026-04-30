@@ -391,7 +391,7 @@ async function main() {
   console.log(`MAX_RETRIES=3`);
   console.log(`RETRY_DELAY_MS=2000`);
   console.log(`WITHDRAW_SIGNAL_PATH=./withdraw-signal.json`);
-  console.log("\nAgent must hold a small SOL balance for tx fees:");
+  console.log("\n⚠ The agent wallet has 0 SOL — fund it for tx fees BEFORE running the agent:");
   console.log(`  solana transfer ${delegateKeypair.publicKey.toBase58()} 0.1 --allow-unfunded-recipient\n`);
 }
 
