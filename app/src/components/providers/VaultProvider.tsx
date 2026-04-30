@@ -9,6 +9,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
@@ -24,19 +25,30 @@ export interface VaultData {
   totalDeposited: BN;
   strategyCount: BN;
   bump: number;
+  vaultAuthorityBump: number;
+  paused: boolean;
+  performanceFeeBps: number;
+  totalActiveWeightBps: number;
+  /** Audit #21: pending two-step admin/authority transfers. `Pubkey::default()` (all zeros) means none. */
+  pendingAdmin: PublicKey;
+  pendingAuthority: PublicKey;
 }
 
 interface VaultContextValue {
-  // Registry
   vaultEntries: VaultEntry[];
   activeEntry: VaultEntry;
+  /** True only when the URL pinpoints a specific vault (`/vault/[address]`). */
+  hasActiveVault: boolean;
+  /**
+   * Navigate to a vault's detail page. Kept named `selectVault` for
+   * backwards-compat with existing callers; the implementation is now
+   * `router.push`, not local state.
+   */
   selectVault: (tokenMint: PublicKey, vaultId: number) => void;
-  // PDAs
   tokenMint: PublicKey;
   vaultPda: PublicKey;
   shareMintPda: PublicKey;
   reserveAta: PublicKey;
-  // State
   vault: VaultData | null;
   shareSupply: BN;
   reserveBalance: BN;
@@ -54,30 +66,41 @@ export function useVault() {
   return ctx;
 }
 
-const STORAGE_KEY = "sol-vault-selected";
+// PDA → entry lookup, built once at module load.
+const ENTRY_BY_PDA: Map<string, VaultEntry> = (() => {
+  const m = new Map<string, VaultEntry>();
+  for (const e of VAULT_REGISTRY) {
+    const pda = deriveVaultPda(e.tokenMint, e.vaultId).toBase58();
+    m.set(pda, e);
+  }
+  return m;
+})();
 
-function vaultKey(entry: VaultEntry): string {
-  return `${entry.tokenMint.toBase58()}:${entry.vaultId}`;
+function entryFromPathname(pathname: string | null): VaultEntry | null {
+  if (!pathname) return null;
+  const m = pathname.match(/^\/vault\/([^/]+)/);
+  if (!m) return null;
+  return ENTRY_BY_PDA.get(m[1]) ?? null;
 }
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const { connection } = useConnection();
   const program = useVaultProgram();
-  const [activeEntry, setActiveEntry] = useState<VaultEntry>(VAULT_REGISTRY[0]);
+  const pathname = usePathname();
+  const router = useRouter();
 
-  // Restore saved vault selection after hydration
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const found = VAULT_REGISTRY.find((v) => vaultKey(v) === saved);
-        if (found) setActiveEntry(found);
-      }
-    } catch {}
-  }, []);
+  const urlEntry = useMemo(() => entryFromPathname(pathname), [pathname]);
+  // Falls back to the first registry entry on non-vault pages so callers can
+  // safely read `activeEntry` (e.g. for symbol metadata). `hasActiveVault`
+  // is the truthy gate for "is this a per-vault page?".
+  const activeEntry = urlEntry ?? VAULT_REGISTRY[0];
+  const hasActiveVault = !!urlEntry;
 
   const tokenMint = activeEntry.tokenMint;
-  const vaultPda = useMemo(() => deriveVaultPda(tokenMint, activeEntry.vaultId), [tokenMint, activeEntry.vaultId]);
+  const vaultPda = useMemo(
+    () => deriveVaultPda(tokenMint, activeEntry.vaultId),
+    [tokenMint, activeEntry.vaultId]
+  );
   const shareMintPda = useMemo(() => deriveShareMintPda(vaultPda), [vaultPda]);
   const reserveAta = useMemo(
     () => deriveReserveAta(vaultPda, tokenMint),
@@ -90,28 +113,38 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const selectVault = useCallback((mint: PublicKey, id: number) => {
-    const entry = VAULT_REGISTRY.find(
-      (v) => v.tokenMint.toBase58() === mint.toBase58() && v.vaultId === id
-    );
-    if (!entry) return;
-    // Skip if already selected
-    if (
-      entry.tokenMint.toBase58() === activeEntry.tokenMint.toBase58() &&
-      entry.vaultId === activeEntry.vaultId
-    ) return;
+  const vaultPdaKey = vaultPda.toBase58();
 
-    setActiveEntry(entry);
+  // Reset cached state when the URL switches between vaults.
+  useEffect(() => {
     setVault(null);
+    setShareSupply(new BN(0));
+    setReserveBalance(new BN(0));
     setLoading(true);
     setError(null);
-    try {
-      localStorage.setItem(STORAGE_KEY, vaultKey(entry));
-    } catch {}
-  }, [activeEntry]);
+  }, [vaultPdaKey]);
+
+  const selectVault = useCallback(
+    (mint: PublicKey, id: number) => {
+      const entry = VAULT_REGISTRY.find(
+        (v) => v.tokenMint.toBase58() === mint.toBase58() && v.vaultId === id
+      );
+      if (!entry) return;
+      const targetPda = deriveVaultPda(entry.tokenMint, entry.vaultId).toBase58();
+      // Preserve the sub-route (e.g. `/admin`) when switching between vaults.
+      const sub = pathname?.match(/^\/vault\/[^/]+(\/.*)$/)?.[1] ?? "";
+      router.push(`/vault/${targetPda}${sub}`);
+    },
+    [pathname, router]
+  );
 
   const refresh = useCallback(async () => {
+    if (!hasActiveVault) {
+      setLoading(false);
+      return;
+    }
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const vaultAccount = await (program.account as any).vaultState.fetch(vaultPda);
       setVault(vaultAccount as unknown as VaultData);
 
@@ -140,13 +173,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [program, connection, vaultPda, shareMintPda, reserveAta]);
+  }, [hasActiveVault, program, connection, vaultPda, shareMintPda, reserveAta]);
 
   useEffect(() => {
     refresh();
+    if (!hasActiveVault) return;
     const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
-  }, [refresh]);
+  }, [refresh, hasActiveVault]);
 
   const sharePrice = useMemo(() => {
     if (!vault || shareSupply.isZero()) return 1;
@@ -156,6 +190,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const value: VaultContextValue = {
     vaultEntries: VAULT_REGISTRY,
     activeEntry,
+    hasActiveVault,
     selectVault,
     tokenMint,
     vaultPda,

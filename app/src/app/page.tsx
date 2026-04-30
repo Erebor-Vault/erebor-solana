@@ -1,69 +1,31 @@
 "use client";
 
-import { useState } from "react";
 import { VaultList } from "@/components/vault/VaultList";
-import { VaultStats } from "@/components/vault/VaultStats";
-import { UserPosition } from "@/components/vault/UserPosition";
-import { DepositForm } from "@/components/vault/DepositForm";
-import { WithdrawForm } from "@/components/vault/WithdrawForm";
-import { AllocationChart } from "@/components/admin/AllocationChart";
-import { useVault } from "@/components/providers/VaultProvider";
+import { AggregateStats } from "@/components/vault/AggregateStats";
 
-export default function DashboardPage() {
-  const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
-  const { activeEntry } = useVault();
-
+export default function HomePage() {
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold mb-1">Vault Dashboard</h1>
-        <p className="text-[var(--color-text-secondary)]">
-          Deposit tokens to earn yield from multi-strategy allocations
+      <header className="max-w-2xl">
+        <h1 className="text-3xl font-semibold tracking-tight">Your vaults</h1>
+        <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+          Erebor multi-strategy vaults on Solana. Each strategy is bounded
+          by an SPL delegate; the agent never holds principal. Click a
+          vault to deposit, withdraw, or manage strategies.
         </p>
-      </div>
+      </header>
 
-      <VaultList />
+      <AggregateStats />
 
-      <div className="flex items-center gap-2 mb-2">
-        <h2 className="text-lg font-semibold">{activeEntry.name}</h2>
-        <span className="rounded-full bg-[var(--color-surface-hover)] px-2 py-0.5 text-xs font-medium">
-          {activeEntry.tokenSymbol}
-        </span>
-      </div>
-
-      <VaultStats />
-
-      <div className="grid gap-8 lg:grid-cols-2">
-        <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-6">
-          <div className="flex gap-1 mb-6">
-            <button
-              onClick={() => setTab("deposit")}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                tab === "deposit"
-                  ? "bg-[var(--color-accent)] text-black"
-                  : "bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              }`}
-            >
-              Deposit
-            </button>
-            <button
-              onClick={() => setTab("withdraw")}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                tab === "withdraw"
-                  ? "bg-[var(--color-accent-secondary)] text-white"
-                  : "bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              }`}
-            >
-              Withdraw
-            </button>
-          </div>
-          {tab === "deposit" ? <DepositForm /> : <WithdrawForm />}
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-xl font-semibold">Vaults</h2>
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Click a vault to open its dashboard.
+          </p>
         </div>
-
-        <UserPosition />
-      </div>
-
-      <AllocationChart />
+        <VaultList />
+      </section>
     </div>
   );
 }

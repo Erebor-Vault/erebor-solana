@@ -4,15 +4,15 @@ import { useVault } from "@/components/providers/VaultProvider";
 import { formatTokenAmount, formatSharePrice, formatPercent } from "@/lib/format";
 
 export function VaultStats() {
-  const { vault, shareSupply, reserveBalance, loading, error } = useVault();
+  const { vault, shareSupply, reserveBalance, activeEntry, loading, error } = useVault();
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[...Array(4)].map((_, i) => (
           <div
             key={i}
-            className="animate-pulse rounded-xl bg-[var(--color-surface-secondary)] p-5 h-24"
+            className="animate-pulse rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-secondary)] h-24"
           />
         ))}
       </div>
@@ -21,7 +21,7 @@ export function VaultStats() {
 
   if (error) {
     return (
-      <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-danger)]/20 p-6 text-center">
+      <div className="rounded-xl border border-[var(--color-danger)]/40 bg-[var(--color-surface-secondary)] p-6 text-center">
         <p className="text-[var(--color-danger)]">{error}</p>
       </div>
     );
@@ -35,16 +35,16 @@ export function VaultStats() {
       ? reserveBalance.toNumber() / totalDeposited.toNumber()
       : 0;
 
-  const stats = [
+  const stats: { label: string; value: string; suffix: string | null }[] = [
     {
       label: "Total Value Locked",
-      value: formatTokenAmount(totalDeposited),
-      suffix: "USDC",
+      value: formatTokenAmount(totalDeposited, activeEntry.tokenDecimals),
+      suffix: activeEntry.tokenSymbol,
     },
     {
       label: "Share Price",
-      value: formatSharePrice(totalDeposited, shareSupply),
-      suffix: "USDC",
+      value: formatSharePrice(totalDeposited, shareSupply, activeEntry.tokenDecimals),
+      suffix: activeEntry.tokenSymbol,
     },
     {
       label: "Reserve Ratio",
@@ -59,16 +59,16 @@ export function VaultStats() {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
       {stats.map((stat) => (
         <div
           key={stat.label}
-          className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-5"
+          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-secondary)] p-5"
         >
-          <p className="text-sm text-[var(--color-text-secondary)]">
+          <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
             {stat.label}
           </p>
-          <p className="mt-1 text-2xl font-bold">
+          <p className="mt-2 text-2xl font-semibold tabular-nums">
             {stat.value}
             {stat.suffix && (
               <span className="ml-1 text-sm font-normal text-[var(--color-text-muted)]">

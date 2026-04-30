@@ -7,7 +7,12 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import BN from "bn.js";
 import { useVaultProgram } from "./useVaultProgram";
 import { useVault } from "@/components/providers/VaultProvider";
-import { deriveStrategyPda, deriveReserveAta } from "@/lib/pda";
+import {
+  deriveStrategyPda,
+  deriveReserveAta,
+  deriveVaultAuthorityPda,
+  deriveStrategyAuthorityPda,
+} from "@/lib/pda";
 
 export function useAuthorityActions() {
   const program = useVaultProgram();
@@ -27,12 +32,14 @@ export function useAuthorityActions() {
       try {
         const strategyPda = deriveStrategyPda(vaultPda, strategyId);
         const reserveAta = deriveReserveAta(vaultPda, tokenMint);
+        const vaultAuthority = deriveVaultAuthorityPda(vaultPda);
 
         const sig = await program.methods
           .allocateToStrategy(amount)
           .accountsStrict({
             authority: wallet.publicKey,
             vaultState: vaultPda,
+            vaultAuthority,
             strategy: strategyPda,
             tokenMint,
             reserveAta,
@@ -62,13 +69,17 @@ export function useAuthorityActions() {
       try {
         const strategyPda = deriveStrategyPda(vaultPda, strategyId);
         const reserveAta = deriveReserveAta(vaultPda, tokenMint);
+        const vaultAuthority = deriveVaultAuthorityPda(vaultPda);
+        const strategyAuthority = deriveStrategyAuthorityPda(vaultPda, strategyId);
 
         const sig = await program.methods
           .deallocateFromStrategy(amount)
           .accountsStrict({
             authority: wallet.publicKey,
             vaultState: vaultPda,
+            vaultAuthority,
             strategy: strategyPda,
+            strategyAuthority,
             tokenMint,
             reserveAta,
             strategyTokenAccount,
@@ -126,13 +137,17 @@ export function useAuthorityActions() {
       try {
         const strategyPda = deriveStrategyPda(vaultPda, strategyId);
         const reserveAta = deriveReserveAta(vaultPda, tokenMint);
+        const vaultAuthority = deriveVaultAuthorityPda(vaultPda);
+        const strategyAuthority = deriveStrategyAuthorityPda(vaultPda, strategyId);
 
         const sig = await program.methods
           .rebalanceStrategy()
           .accountsStrict({
-            payer: wallet.publicKey,
+            authority: wallet.publicKey,
             vaultState: vaultPda,
+            vaultAuthority,
             strategy: strategyPda,
+            strategyAuthority,
             tokenMint,
             reserveAta,
             strategyTokenAccount,
@@ -158,7 +173,7 @@ export function useAuthorityActions() {
 
       setLoading(true);
       try {
-        // Calculate deltas and sort: deallocations first, then allocations
+        // Sort deallocations first to free reserve before allocations.
         const withDelta = strategies
           .filter((s) => s.targetWeightBps > 0 || s.allocatedAmount.toNumber() > 0)
           .map((s) => {
@@ -171,15 +186,19 @@ export function useAuthorityActions() {
 
         const sigs: string[] = [];
         const reserveAta = deriveReserveAta(vaultPda, tokenMint);
+        const vaultAuthority = deriveVaultAuthorityPda(vaultPda);
 
         for (const s of withDelta) {
           const strategyPda = deriveStrategyPda(vaultPda, s.strategyId);
+          const strategyAuthority = deriveStrategyAuthorityPda(vaultPda, s.strategyId);
           const sig = await program.methods
             .rebalanceStrategy()
             .accountsStrict({
-              payer: wallet.publicKey,
+              authority: wallet.publicKey,
               vaultState: vaultPda,
+              vaultAuthority,
               strategy: strategyPda,
+              strategyAuthority,
               tokenMint,
               reserveAta,
               strategyTokenAccount: s.tokenAccount,

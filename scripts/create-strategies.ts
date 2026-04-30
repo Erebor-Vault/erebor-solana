@@ -111,6 +111,14 @@ async function main() {
       ],
       program.programId
     );
+    const [sAuthority] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("strategy_authority"),
+        vaultPda.toBuffer(),
+        new BN(strategyIndex).toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
     const [sToken] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("strategy_token"),
@@ -120,7 +128,17 @@ async function main() {
       program.programId
     );
 
-    // Create strategy
+    // Pass existing strategy PDAs in remaining_accounts so the program's
+    // dedupe loop can reject collisions (audit #10 mitigation).
+    const existingStrategyMetas = [];
+    for (let j = 0; j < strategyIndex; j++) {
+      const [pda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(j).toArrayLike(Buffer, "le", 8)],
+        program.programId,
+      );
+      existingStrategyMetas.push({ pubkey: pda, isSigner: false, isWritable: false });
+    }
+
     console.log(`Creating Strategy #${strategyIndex}: ${STRATEGIES[i].name}`);
     await program.methods
       .createStrategy()
@@ -128,12 +146,14 @@ async function main() {
         admin: payer.publicKey,
         vaultState: vaultPda,
         strategy: sPda,
+        strategyAuthority: sAuthority,
         tokenMint: TOKEN_MINT,
         strategyTokenAccount: sToken,
         delegate: agentKeypair.publicKey,
         systemProgram: SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
+      .remainingAccounts(existingStrategyMetas)
       .rpc();
 
     // Set weight

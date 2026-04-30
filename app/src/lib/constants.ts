@@ -47,38 +47,45 @@ export interface VaultEntry {
   vaultId: number;
 }
 
+// Phase-3 round-5 test mint (post per-strategy-authority refactor).
+// Pre-refactor mints (HgctyjCk…, J1qLR4P2…, BZwn5e9G…, 45AbULTJ…) are
+// orphaned — see DEPLOYMENT.md.
+const TEST_USDC_MINT = new PublicKey(
+  "5BTPntEhZXMK4FTjJe3VqJM1qZZr58ANpWfJQThPRb6N"
+);
+
 export const VAULT_REGISTRY: VaultEntry[] = [
   {
     name: "AT trader agent",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenMint: TEST_USDC_MINT,
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 0,
   },
   {
     name: "Conservative",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenMint: TEST_USDC_MINT,
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 1,
   },
   {
     name: "Aggressive Vault",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenMint: TEST_USDC_MINT,
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 2,
   },
   {
     name: "Stablecoin Yield",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenMint: TEST_USDC_MINT,
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 3,
   },
   {
     name: "DeFi Alpha",
-    tokenMint: new PublicKey("45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY"),
+    tokenMint: TEST_USDC_MINT,
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 4,

@@ -7,12 +7,15 @@ skip-lint = false
 
 [programs.devnet]
 my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+mock_kamino = "HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2"
 
 [programs.localnet]
 my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+mock_kamino = "HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2"
 
 [programs.mainnet]
 my_project = "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
+mock_kamino = "HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2"
 
 [registry]
 url = "https://api.apr.dev"

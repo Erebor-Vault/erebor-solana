@@ -10,7 +10,7 @@ import {
 import BN from "bn.js";
 import { useVaultProgram } from "./useVaultProgram";
 import { useVault } from "@/components/providers/VaultProvider";
-import { deriveUserAta } from "@/lib/pda";
+import { deriveUserAta, deriveVaultAuthorityPda } from "@/lib/pda";
 
 export function useDeposit() {
   const program = useVaultProgram();
@@ -26,12 +26,14 @@ export function useDeposit() {
       try {
         const userTokenAccount = deriveUserAta(tokenMint, wallet.publicKey);
         const userShareToken = deriveUserAta(shareMintPda, wallet.publicKey);
+        const vaultAuthority = deriveVaultAuthorityPda(vaultPda);
 
         const sig = await program.methods
           .deposit(amount)
           .accountsStrict({
             user: wallet.publicKey,
             vaultState: vaultPda,
+            vaultAuthority,
             tokenMint,
             shareMint: shareMintPda,
             userTokenAccount,

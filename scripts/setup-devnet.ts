@@ -126,13 +126,17 @@ async function main() {
     [Buffer.from("vault"), tokenMint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
     program.programId
   );
+  const [vaultAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultPda.toBuffer()],
+    program.programId
+  );
   const [shareMintPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("shares"), vaultPda.toBuffer()],
     program.programId
   );
   const reserveAta = anchor.utils.token.associatedAddress({
     mint: tokenMint,
-    owner: vaultPda,
+    owner: vaultAuthority,
   });
 
   await program.methods
@@ -140,6 +144,7 @@ async function main() {
     .accountsStrict({
       admin: walletKeypair.publicKey,
       vaultState: vaultPda,
+      vaultAuthority,
       tokenMint,
       shareMint: shareMintPda,
       reserveAta,
@@ -167,6 +172,7 @@ async function main() {
     .accountsStrict({
       user: walletKeypair.publicKey,
       vaultState: vaultPda,
+      vaultAuthority,
       tokenMint,
       shareMint: shareMintPda,
       userTokenAccount: userAta,
@@ -186,6 +192,7 @@ async function main() {
 
   const strategyInfos: {
     pda: PublicKey;
+    authority: PublicKey;
     tokenAccount: PublicKey;
     yieldBps: number;
     name: string;
@@ -201,6 +208,14 @@ async function main() {
       ],
       program.programId
     );
+    const [sAuthority] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("strategy_authority"),
+        vaultPda.toBuffer(),
+        new BN(i).toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    );
     const [sToken] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("strategy_token"),
@@ -210,22 +225,31 @@ async function main() {
       program.programId
     );
 
+    const existingMetas = strategyInfos.map((x) => ({
+      pubkey: x.pda,
+      isSigner: false,
+      isWritable: false,
+    }));
+
     await program.methods
       .createStrategy()
       .accountsStrict({
         admin: walletKeypair.publicKey,
         vaultState: vaultPda,
         strategy: sPda,
+        strategyAuthority: sAuthority,
         tokenMint,
         strategyTokenAccount: sToken,
         delegate: delegate.publicKey,
         systemProgram: SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
+      .remainingAccounts(existingMetas)
       .rpc();
 
     strategyInfos.push({
       pda: sPda,
+      authority: sAuthority,
       tokenAccount: sToken,
       yieldBps: STRATEGIES[i].yieldBps,
       name: STRATEGIES[i].name,
@@ -250,6 +274,7 @@ async function main() {
       .accountsStrict({
         authority: walletKeypair.publicKey,
         vaultState: vaultPda,
+        vaultAuthority,
         strategy: strategyInfos[i].pda,
         tokenMint,
         reserveAta,

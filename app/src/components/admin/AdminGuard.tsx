@@ -1,5 +1,6 @@
 "use client";
 
+import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useVault } from "@/components/providers/VaultProvider";
 import { truncateAddress } from "@/lib/format";
@@ -37,8 +38,16 @@ export function AdminGuard({ children }: { children: ReactNode }) {
 
   const isAdmin = publicKey?.equals(vault.admin);
   const isAuthority = publicKey?.equals(vault.authority);
+  const isPendingAdmin =
+    !!publicKey &&
+    !vault.pendingAdmin.equals(PublicKey.default) &&
+    publicKey.equals(vault.pendingAdmin);
+  const isPendingAuthority =
+    !!publicKey &&
+    !vault.pendingAuthority.equals(PublicKey.default) &&
+    publicKey.equals(vault.pendingAuthority);
 
-  if (!isAdmin && !isAuthority) {
+  if (!isAdmin && !isAuthority && !isPendingAdmin && !isPendingAuthority) {
     return (
       <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-10 text-center">
         <p className="text-lg text-[var(--color-text-secondary)] mb-2">

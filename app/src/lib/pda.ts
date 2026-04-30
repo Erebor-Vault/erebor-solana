@@ -22,11 +22,52 @@ export function deriveShareMintPda(vaultState: PublicKey): PublicKey {
   return pda;
 }
 
+export function deriveProtocolConfigPda(): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("protocol_config")],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+export function deriveAllowedTokenPda(mint: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("allowed_token"), mint.toBuffer()],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+export function deriveVaultAuthorityPda(vaultState: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultState.toBuffer()],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+export function deriveStrategyAuthorityPda(
+  vaultState: PublicKey,
+  strategyId: number
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("strategy_authority"),
+      vaultState.toBuffer(),
+      new BN(strategyId).toArrayLike(Buffer, "le", 8),
+    ],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
 export function deriveReserveAta(
   vaultState: PublicKey,
   tokenMint: PublicKey
 ): PublicKey {
-  return getAssociatedTokenAddressSync(tokenMint, vaultState, true);
+  // Reserve ATA is now owned by vault_authority, not vault_state.
+  const vaultAuthority = deriveVaultAuthorityPda(vaultState);
+  return getAssociatedTokenAddressSync(tokenMint, vaultAuthority, true);
 }
 
 export function deriveStrategyPda(

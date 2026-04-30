@@ -12,6 +12,26 @@ Think of it as an ERC-4626-style vault designed specifically for AI agent strate
 
 **Explorer:** [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet)
 
+## Documentation index
+
+The structured spec set lives at the repo root. Read in this order:
+
+1. [OVERVIEW.md](OVERVIEW.md) — high-level pitch + architecture
+   explainer.
+2. [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) — build spec (partly
+   aspirational; see status section at the top).
+3. [CLAUDE.md](CLAUDE.md) — contributor guide (commands +
+   invariants).
+4. [FRONTEND.md](FRONTEND.md) — current dashboard snapshot.
+5. [FRONTEND_PLAN.md](FRONTEND_PLAN.md) — forward-looking frontend
+   roadmap.
+6. [MISMATCHES.md](MISMATCHES.md) — every place the spec diverges
+   from what's actually shipped today.
+
+Other top-level docs: [PLAN.md](PLAN.md) (historical implementation
+checklist), [AI_PLAN.md](AI_PLAN.md) (AI agent design),
+[DEPLOYMENT.md](DEPLOYMENT.md) (live program + per-vault PDAs).
+
 ## The problem
 
 AI agents that trade and lend in DeFi are fragmented. Each runs on a different platform, in its own wallet, with its own rules. If you want to use three agents, you need to independently research each one's audit status, code quality, track record, and wallet security — then manage three separate wallets with no portfolio-level view, no rebalancing, and no way to spread risk.

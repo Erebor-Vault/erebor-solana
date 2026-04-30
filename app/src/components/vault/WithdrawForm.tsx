@@ -22,12 +22,15 @@ export function WithdrawForm() {
   const [status, setStatus] = useState("");
 
   const parsedShares = parseTokenInput(amount);
-  const estimatedTokens = parsedShares
+  const grossTokens = parsedShares
     ? parsedShares.toNumber() * sharePrice
     : 0;
+  const feeBps = vault?.performanceFeeBps ?? 0;
+  const feeTokens = Math.floor((grossTokens * feeBps) / 10_000);
+  const estimatedTokens = grossTokens - feeTokens;
 
   const reserveInsufficient =
-    estimatedTokens > 0 && estimatedTokens > reserveBalance.toNumber();
+    grossTokens > 0 && grossTokens > reserveBalance.toNumber();
 
   const handleWithdraw = async () => {
     if (!parsedShares) return;
@@ -77,9 +80,23 @@ export function WithdrawForm() {
       />
 
       {parsedShares && (
-        <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
-          <span>You will receive</span>
-          <span>~{formatTokenAmount(estimatedTokens)} USDC</span>
+        <div className="space-y-1 text-sm">
+          <div className="flex justify-between text-[var(--color-text-secondary)]">
+            <span>Gross redemption</span>
+            <span className="tabular-nums">~{formatTokenAmount(grossTokens)} USDC</span>
+          </div>
+          {feeBps > 0 && (
+            <div className="flex justify-between text-[var(--color-text-muted)]">
+              <span>
+                Performance fee ({(feeBps / 100).toFixed(2)}%)
+              </span>
+              <span className="tabular-nums">−{formatTokenAmount(feeTokens)} USDC</span>
+            </div>
+          )}
+          <div className="flex justify-between border-t border-[var(--color-border)] pt-1 font-medium">
+            <span>You will receive</span>
+            <span className="tabular-nums">~{formatTokenAmount(estimatedTokens)} USDC</span>
+          </div>
         </div>
       )}
 

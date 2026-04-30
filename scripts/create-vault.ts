@@ -61,10 +61,13 @@ async function main() {
   const [vaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), TOKEN_MINT.toBuffer(), new BN(VAULT_ID).toArrayLike(Buffer, "le", 8)], program.programId
   );
+  const [vaultAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultPda.toBuffer()], program.programId
+  );
   const [shareMintPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("shares"), vaultPda.toBuffer()], program.programId
   );
-  const reserveAta = anchor.utils.token.associatedAddress({ mint: TOKEN_MINT, owner: vaultPda });
+  const reserveAta = anchor.utils.token.associatedAddress({ mint: TOKEN_MINT, owner: vaultAuthority });
 
   // Check if vault already exists
   const existing = await connection.getAccountInfo(vaultPda);
@@ -91,6 +94,7 @@ async function main() {
   await program.methods.initializeVault(new BN(VAULT_ID)).accountsStrict({
     admin: payer.publicKey,
     vaultState: vaultPda,
+    vaultAuthority,
     tokenMint: TOKEN_MINT,
     shareMint: shareMintPda,
     reserveAta,
@@ -101,20 +105,21 @@ async function main() {
 
   console.log("   Vault created!\n");
 
-  // Transfer admin + authority
+  // Two-step admin/authority transfer (audit #21). The recipient must call
+  // accept_admin / accept_authority from their own keypair to finalise.
   if (!TARGET_WALLET.equals(payer.publicKey)) {
-    console.log("Transferring admin & authority...");
+    console.log("Proposing admin & authority transfer...");
 
-    await program.methods.setAuthority(TARGET_WALLET).accountsStrict({
+    await program.methods.proposeAuthority(TARGET_WALLET).accountsStrict({
       admin: payer.publicKey, vaultState: vaultPda,
     }).rpc();
 
-    await program.methods.transferAdmin(TARGET_WALLET).accountsStrict({
+    await program.methods.proposeAdmin(TARGET_WALLET).accountsStrict({
       admin: payer.publicKey, vaultState: vaultPda,
     }).rpc();
 
-    console.log(`   Admin ->     ${TARGET_WALLET.toBase58()}`);
-    console.log(`   Authority -> ${TARGET_WALLET.toBase58()}\n`);
+    console.log(`   Pending admin/authority -> ${TARGET_WALLET.toBase58()}`);
+    console.log(`   (target must call accept_admin + accept_authority to finalise)\n`);
   }
 
   // Summary

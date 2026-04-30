@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { truncateAddress, formatTokenAmount } from "@/lib/format";
 import { useVault } from "@/components/providers/VaultProvider";
 import { useAuthorityActions } from "@/hooks/useAuthorityActions";
@@ -14,7 +15,7 @@ interface Props {
 }
 
 export function StrategyCard({ strategy, onRefresh }: Props) {
-  const { vault } = useVault();
+  const { vault, vaultPda } = useVault();
   const { rebalanceStrategy, reportYield } = useAuthorityActions();
   const { deactivateStrategy, setStrategyWeight } = useAdminActions();
   const [weightInput, setWeightInput] = useState("");
@@ -80,14 +81,22 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
             </span>
           )}
         </div>
-        {strategy.isActive && (
-          <button
-            onClick={() => setShowActions(!showActions)}
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/vault/${vaultPda.toBase58()}/admin/strategy/${strategy.strategyId.toString()}`}
             className="text-sm text-[var(--color-accent)] hover:underline"
           >
-            {showActions ? "Hide" : "Actions"}
-          </button>
-        )}
+            Configure →
+          </Link>
+          {strategy.isActive && (
+            <button
+              onClick={() => setShowActions(!showActions)}
+              className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:underline"
+            >
+              {showActions ? "Hide" : "Quick actions"}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm">

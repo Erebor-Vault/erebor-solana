@@ -105,6 +105,11 @@ async function main() {
     program.programId
   );
 
+  const [vaultAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultPda.toBuffer()],
+    program.programId
+  );
+
   const [shareMintPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("shares"), vaultPda.toBuffer()],
     program.programId
@@ -112,13 +117,14 @@ async function main() {
 
   const reserveAta = anchor.utils.token.associatedAddress({
     mint: tokenMint,
-    owner: vaultPda,
+    owner: vaultAuthority,
   });
 
   console.log("Derived accounts:");
-  console.log(`  Vault PDA:   ${vaultPda.toBase58()}`);
-  console.log(`  Share Mint:  ${shareMintPda.toBase58()}`);
-  console.log(`  Reserve ATA: ${reserveAta.toBase58()}`);
+  console.log(`  Vault PDA:        ${vaultPda.toBase58()}`);
+  console.log(`  Vault Authority:  ${vaultAuthority.toBase58()}`);
+  console.log(`  Share Mint:       ${shareMintPda.toBase58()}`);
+  console.log(`  Reserve ATA:      ${reserveAta.toBase58()}`);
   console.log();
 
   // Check if vault already exists
@@ -153,6 +159,7 @@ async function main() {
     .accountsStrict({
       admin: walletKeypair.publicKey,
       vaultState: vaultPda,
+      vaultAuthority,
       tokenMint: tokenMint,
       shareMint: shareMintPda,
       reserveAta: reserveAta,

@@ -121,13 +121,17 @@ async function main() {
     [Buffer.from("vault"), tokenMint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)],
     program.programId
   );
+  const [vaultAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultPda.toBuffer()],
+    program.programId
+  );
   const [shareMintPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("shares"), vaultPda.toBuffer()],
     program.programId
   );
   const reserveAta = anchor.utils.token.associatedAddress({
     mint: tokenMint,
-    owner: vaultPda,
+    owner: vaultAuthority,
   });
 
   await program.methods
@@ -135,6 +139,7 @@ async function main() {
     .accountsStrict({
       admin: payer.publicKey,
       vaultState: vaultPda,
+      vaultAuthority,
       tokenMint,
       shareMint: shareMintPda,
       reserveAta,
@@ -144,31 +149,33 @@ async function main() {
     })
     .rpc();
 
-  console.log(`   Vault PDA:   ${vaultPda.toBase58()}`);
-  console.log(`   Share Mint:  ${shareMintPda.toBase58()}`);
+  console.log(`   Vault PDA:        ${vaultPda.toBase58()}`);
+  console.log(`   Vault Authority:  ${vaultAuthority.toBase58()}`);
+  console.log(`   Share Mint:       ${shareMintPda.toBase58()}`);
 
   // -------------------------------------------------------------------
-  // Step 4: Transfer admin and authority to target wallet
+  // Step 4: Propose admin and authority transfer to target wallet
   // -------------------------------------------------------------------
-  console.log("\n4. Transferring admin & authority to target wallet...");
+  console.log("\n4. Proposing admin & authority transfer (two-step)...");
 
   await program.methods
-    .setAuthority(TARGET_WALLET)
+    .proposeAuthority(TARGET_WALLET)
     .accountsStrict({
       admin: payer.publicKey,
       vaultState: vaultPda,
     })
     .rpc();
-  console.log(`   Authority set to: ${TARGET_WALLET.toBase58()}`);
+  console.log(`   Pending authority: ${TARGET_WALLET.toBase58()}`);
 
   await program.methods
-    .transferAdmin(TARGET_WALLET)
+    .proposeAdmin(TARGET_WALLET)
     .accountsStrict({
       admin: payer.publicKey,
       vaultState: vaultPda,
     })
     .rpc();
-  console.log(`   Admin transferred to: ${TARGET_WALLET.toBase58()}`);
+  console.log(`   Pending admin:     ${TARGET_WALLET.toBase58()}`);
+  console.log(`   (target must call accept_admin + accept_authority to finalise)`);
 
   // -------------------------------------------------------------------
   // Summary

@@ -95,14 +95,18 @@ async function main() {
   const [vaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), tokenMint.toBuffer(), new BN(0).toArrayLike(Buffer, "le", 8)], program.programId
   );
+  const [vaultAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultPda.toBuffer()], program.programId
+  );
   const [shareMintPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("shares"), vaultPda.toBuffer()], program.programId
   );
-  const reserveAta = anchor.utils.token.associatedAddress({ mint: tokenMint, owner: vaultPda });
+  const reserveAta = anchor.utils.token.associatedAddress({ mint: tokenMint, owner: vaultAuthority });
 
   await program.methods.initializeVault(new BN(0)).accountsStrict({
     admin: payer.publicKey,
     vaultState: vaultPda,
+    vaultAuthority,
     tokenMint,
     shareMint: shareMintPda,
     reserveAta,
@@ -129,21 +133,32 @@ async function main() {
       [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(i).toArrayLike(Buffer, "le", 8)],
       program.programId
     );
+    const [sAuthority] = PublicKey.findProgramAddressSync(
+      [Buffer.from("strategy_authority"), vaultPda.toBuffer(), new BN(i).toArrayLike(Buffer, "le", 8)],
+      program.programId
+    );
     const [sToken] = PublicKey.findProgramAddressSync(
       [Buffer.from("strategy_token"), vaultPda.toBuffer(), new BN(i).toArrayLike(Buffer, "le", 8)],
       program.programId
     );
 
+    const existingMetas = strategyResults.map((x) => ({
+      pubkey: new PublicKey(x.pda),
+      isSigner: false,
+      isWritable: false,
+    }));
+
     await program.methods.createStrategy().accountsStrict({
       admin: payer.publicKey,
       vaultState: vaultPda,
       strategy: sPda,
+      strategyAuthority: sAuthority,
       tokenMint,
       strategyTokenAccount: sToken,
       delegate: agentKeypair.publicKey,
       systemProgram: SystemProgram.programId,
       tokenProgram: TOKEN_PROGRAM_ID,
-    }).rpc();
+    }).remainingAccounts(existingMetas).rpc();
 
     await program.methods.setStrategyWeight(STRATEGIES[i].weightBps).accountsStrict({
       admin: payer.publicKey,
@@ -165,18 +180,19 @@ async function main() {
     });
   }
 
-  // ---- Step 5: Transfer admin + authority to target wallet ----
-  console.log("\n5. Transferring admin & authority to target wallet...");
+  // ---- Step 5: Propose admin + authority transfer (two-step, audit #21) ----
+  console.log("\n5. Proposing admin & authority transfer to target wallet...");
 
-  await program.methods.setAuthority(TARGET_WALLET).accountsStrict({
+  await program.methods.proposeAuthority(TARGET_WALLET).accountsStrict({
     admin: payer.publicKey, vaultState: vaultPda,
   }).rpc();
-  console.log(`   Authority -> ${TARGET_WALLET.toBase58()}`);
+  console.log(`   Pending authority -> ${TARGET_WALLET.toBase58()}`);
 
-  await program.methods.transferAdmin(TARGET_WALLET).accountsStrict({
+  await program.methods.proposeAdmin(TARGET_WALLET).accountsStrict({
     admin: payer.publicKey, vaultState: vaultPda,
   }).rpc();
-  console.log(`   Admin -> ${TARGET_WALLET.toBase58()}`);
+  console.log(`   Pending admin -> ${TARGET_WALLET.toBase58()}`);
+  console.log(`   (target must call accept_admin + accept_authority to finalise)`);
 
   // ---- Summary ----
   const vault = await program.account.vaultState.fetch(vaultPda);

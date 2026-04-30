@@ -17,10 +17,11 @@ app/.next
 app/.env.local
 app/out
 
-# Agent
-agent/.env
-agent/state.json
-agent/withdraw-signal.json
+# Agents
+agent/**/.env
+agent/**/state.json
+agent/**/withdraw-signal.json
+agent/**/node_modules
 
 # Build artifacts
 Cargo.lock
@@ -35,3 +36,21 @@ Cargo.lock
 .env
 
 *.lock
+
+# Keypairs & secrets
+*_keypair.json
+*-keypair.json
+*.key
+*.pem
+credentials*.json
+secrets*.json
+
+# Test results
+test-results/
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
