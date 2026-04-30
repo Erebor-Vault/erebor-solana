@@ -19,7 +19,7 @@ function optionalEnv(name: string, fallback: string): string {
 
 // Erebor vault program ID — must match the declare_id! in lib.rs.
 export const VAULT_PROGRAM_ID = new PublicKey(
-  "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
+  "DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B"
 );
 
 export interface KaminoLooperConfig {
@@ -28,18 +28,12 @@ export interface KaminoLooperConfig {
   rpcUrl: string;
 
   // Vault
-  vaultTokenMint: PublicKey;
+  vaultTokenMint: PublicKey;     // single mint for the strategy (e.g. USDC)
   vaultId: number;
   strategyId: number;
 
   // Protocols
   kaminoProgramId: PublicKey;
-  jupiterProgramId: PublicKey;
-
-  // Asset mints
-  usdcMint: PublicKey;
-  btcMint: PublicKey;
-  solMint: PublicKey;
 
   // Strategy parameters
   evalIntervalMs: number;
@@ -49,6 +43,14 @@ export interface KaminoLooperConfig {
   minLoopNetApyPct: number;
   hfComfortable: number;
   hfWarning: number;
+
+  // Agent's expected APY rates for the underlying mint. mock_kamino doesn't
+  // expose APY on-chain — yield comes from admin-driven simulate_yield calls
+  // that raise the reserve's redemption rate. These config values feed the
+  // open-loop economics check; set them to match what the test harness
+  // simulates. On real Kamino we'd read live rates from the protocol instead.
+  usdcSupplyApyBps: number;
+  usdcBorrowApyBps: number;
 
   // Operational
   dryRun: boolean;
@@ -68,13 +70,6 @@ export function loadConfig(): KaminoLooperConfig {
     strategyId: Number(optionalEnv("STRATEGY_ID", "0")),
 
     kaminoProgramId: new PublicKey(requireEnv("KAMINO_PROGRAM_ID")),
-    jupiterProgramId: new PublicKey(
-      optionalEnv("JUPITER_PROGRAM_ID", "43FrWWHc13Fp4rsnb3XjDV5dfmWWoyLNzdSe1pqkLxn7")
-    ),
-
-    usdcMint: new PublicKey(requireEnv("USDC_MINT")),
-    btcMint: new PublicKey(requireEnv("BTC_MINT")),
-    solMint: new PublicKey(requireEnv("SOL_MINT")),
 
     evalIntervalMs: Number(optionalEnv("EVAL_INTERVAL_MS", "300000")),
     maxLeverage: Number(optionalEnv("MAX_LEVERAGE", "3.0")),
@@ -83,6 +78,9 @@ export function loadConfig(): KaminoLooperConfig {
     minLoopNetApyPct: Number(optionalEnv("MIN_LOOP_NET_APY_PCT", "1.5")),
     hfComfortable: Number(optionalEnv("HF_COMFORTABLE", "1.8")),
     hfWarning: Number(optionalEnv("HF_WARNING", "1.3")),
+
+    usdcSupplyApyBps: Number(optionalEnv("USDC_SUPPLY_APY_BPS", "600")),
+    usdcBorrowApyBps: Number(optionalEnv("USDC_BORROW_APY_BPS", "400")),
 
     dryRun: optionalEnv("DRY_RUN", "false") === "true",
   });

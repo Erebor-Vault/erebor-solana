@@ -1,24 +1,24 @@
-// @ts-nocheck — TODO(step5b): adjust on-chain validation for new StrategyAccount.
-// References strategy.actionCount which doesn't exist on OLD_Erebor's layout.
-//
 // index.ts — Kamino looper agent entry point.
 //
 // Startup sequence:
 //   1. Load config from .env
 //   2. Connect to Solana RPC
-//   3. Derive vault, strategy, and strategy token account PDAs
+//   3. Derive vault, strategy, strategy_token, strategy_authority PDAs +
+//      the agent's USDC ATA
 //   4. Validate vault state, strategy active, agent matches delegate
 //   5. Start the main eval loop
 
 import { Connection } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { loadConfig, VAULT_PROGRAM_ID } from "./config.js";
 import {
   createProgram,
-  deriveVaultPda,
+  deriveStrategyAuthorityPda,
   deriveStrategyPda,
   deriveStrategyTokenPda,
-  fetchVaultState,
+  deriveVaultPda,
   fetchStrategy,
+  fetchVaultState,
 } from "../../shared/vault-client.js";
 import { startMainLoop } from "./loop/mainLoop.js";
 
@@ -47,10 +47,23 @@ async function main() {
   const vaultPda = deriveVaultPda(config.vaultTokenMint, config.vaultId, VAULT_PROGRAM_ID);
   const strategyPda = deriveStrategyPda(vaultPda, config.strategyId, VAULT_PROGRAM_ID);
   const strategyTokenPda = deriveStrategyTokenPda(vaultPda, config.strategyId, VAULT_PROGRAM_ID);
+  const strategyAuthorityPda = deriveStrategyAuthorityPda(
+    vaultPda,
+    config.strategyId,
+    VAULT_PROGRAM_ID
+  );
+  // Agent's own USDC ATA — anti-theft snapshot point on every execute_action.
+  // Must already exist on-chain (setup script creates it).
+  const agentTokenAta = getAssociatedTokenAddressSync(
+    config.vaultTokenMint,
+    config.agentKeypair.publicKey
+  );
 
-  console.log(`Vault PDA:        ${vaultPda.toBase58()}`);
-  console.log(`Strategy PDA:     ${strategyPda.toBase58()}`);
-  console.log(`Strategy Token:   ${strategyTokenPda.toBase58()}\n`);
+  console.log(`Vault PDA:           ${vaultPda.toBase58()}`);
+  console.log(`Strategy PDA:        ${strategyPda.toBase58()}`);
+  console.log(`Strategy Token:      ${strategyTokenPda.toBase58()}`);
+  console.log(`Strategy Authority:  ${strategyAuthorityPda.toBase58()}`);
+  console.log(`Agent Token ATA:     ${agentTokenAta.toBase58()}\n`);
 
   // Step 4: Validate on-chain state
   console.log("Validating on-chain state...");
@@ -75,7 +88,9 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`  Strategy active, delegate verified, action_count=${strategy.actionCount}\n`);
+  console.log(
+    `  Strategy active, delegate verified, target_weight=${strategy.targetWeightBps} bps\n`
+  );
 
   // Step 5: Graceful shutdown
   process.on("SIGINT", () => {
@@ -95,7 +110,9 @@ async function main() {
     vaultPda,
     strategyPda,
     strategyTokenPda,
+    strategyAuthorityPda,
     vaultProgramId: VAULT_PROGRAM_ID,
+    agentTokenAta,
   });
 }
 

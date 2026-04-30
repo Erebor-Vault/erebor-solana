@@ -1,46 +1,43 @@
-// @ts-nocheck — TODO(step5b): rewrite for OLD_Erebor's cToken model.
-// References deleted symbols (fetchPriceOracle, getReserveApys, ASSET_USDC,
-// obligationUsdValues) and the old KaminoActionContext shape. Step 5b
-// rebuilds the portfolio read on cToken-balance + obligation.borrowed_liquidity.
-//
 // mainLoop.ts — Eval cycle orchestrator for the kamino_looper agent.
 //
 // Every EVAL_INTERVAL_MS:
-//   1. Read portfolio state (obligation + idle balance + prices)
-//   2. Read APYs from kamino reserves
-//   3. Compute loop APYs and decide an action via the allocator
-//   4. Execute the decision (or log it in dry-run mode)
+//   1. Read portfolio state — strategy ATA balance, cToken ATA balance,
+//      reserve totals, obligation debt.
+//   2. Compute single-asset loop APYs from agent-side config.
+//   3. Decide an action via the allocator.
+//   4. Execute the decision (or log it in dry-run mode).
 //
 // Errors in a single cycle don't kill the loop — they're logged and the next
 // cycle proceeds normally.
 
-import { Connection } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { Program } from "@coral-xyz/anchor";
 import type { MyProject } from "../../../../target/types/my_project.js";
 import type { KaminoLooperConfig } from "../config.js";
 import { fetchTokenBalance } from "../../../shared/vault-client.js";
 import {
+  deriveKaminoReservePda,
   fetchObligation,
-  fetchPriceOracle,
-  getReserveApys,
-  obligationUsdValues,
+  fetchReserve,
+  fetchSuppliedLiquidity,
+  type ReserveData,
 } from "../chain/kamino.js";
-import { computeAllLoopApys } from "../strategy/apyScanner.js";
+import { computeUsdcLoopApys } from "../strategy/apyScanner.js";
 import { decideAllocation, type PortfolioState } from "../strategy/allocator.js";
-import {
-  ASSET_USDC,
-  type KaminoActionContext,
-} from "../chain/vault.js";
+import { type KaminoActionContext } from "../chain/vault.js";
 import { closeUsdcLoop, openUsdcLoop } from "../strategy/leverageManager.js";
+import { bpsToDecimal } from "../utils/math.js";
 
 export interface LoopContext {
   config: KaminoLooperConfig;
   connection: Connection;
   vaultProgram: Program<MyProject>;
-  vaultPda: import("@solana/web3.js").PublicKey;
-  strategyPda: import("@solana/web3.js").PublicKey;
-  strategyTokenPda: import("@solana/web3.js").PublicKey;
-  vaultProgramId: import("@solana/web3.js").PublicKey;
+  vaultPda: PublicKey;
+  strategyPda: PublicKey;
+  strategyTokenPda: PublicKey;
+  strategyAuthorityPda: PublicKey;
+  vaultProgramId: PublicKey;
+  agentTokenAta: PublicKey;
 }
 
 export async function startMainLoop(loopCtx: LoopContext): Promise<void> {
@@ -69,38 +66,46 @@ export async function startMainLoop(loopCtx: LoopContext): Promise<void> {
 }
 
 async function pollCycle(loopCtx: LoopContext): Promise<void> {
-  const { config, connection, vaultProgram, vaultPda, strategyPda, strategyTokenPda, vaultProgramId } =
-    loopCtx;
+  const { config, connection, strategyTokenPda, strategyAuthorityPda } = loopCtx;
+  const usdcMint = config.vaultTokenMint;
+  const reservePda = deriveKaminoReservePda(usdcMint, config.kaminoProgramId);
 
   // ── Step 1: Read portfolio state ──────────────────────────────────────
-  const [idleBalance, obligation, prices] = await Promise.all([
+  const [idleBalance, supplied, obligation, reserve] = await Promise.all([
     fetchTokenBalance(connection, strategyTokenPda).catch(() => 0),
-    fetchObligation(connection, strategyTokenPda, config.kaminoProgramId),
-    fetchPriceOracle(connection, config.kaminoProgramId),
+    fetchSuppliedLiquidity(
+      connection,
+      usdcMint,
+      strategyAuthorityPda,
+      config.kaminoProgramId
+    ),
+    fetchObligation(
+      connection,
+      reservePda,
+      strategyAuthorityPda,
+      config.kaminoProgramId
+    ),
+    fetchReserve(connection, usdcMint, config.kaminoProgramId),
   ]);
 
-  if (!prices) {
-    console.log("  Price oracle not initialized yet — skipping cycle");
+  if (!reserve) {
+    console.log("  Reserve not initialized — skipping cycle");
     return;
   }
 
-  const obligationData = obligation || {
-    usdcSupplied: 0,
-    usdcBorrowed: 0,
-    btcSupplied: 0,
-    btcBorrowed: 0,
-    solSupplied: 0,
-    solBorrowed: 0,
-  };
+  const ctokenBalance = supplied?.ctokenBalance ?? 0;
+  const suppliedUsdc = supplied?.suppliedLiquidity ?? 0;
+  const borrowedUsdc = obligation?.borrowedLiquidity ?? 0;
+  const healthFactor = borrowedUsdc > 0 ? suppliedUsdc / borrowedUsdc : Infinity;
+  const totalValueUsdc = idleBalance + suppliedUsdc - borrowedUsdc;
 
-  const usdValues = obligationUsdValues(obligationData, prices);
   const portfolio: PortfolioState = {
-    totalValueUsd:
-      usdValues.collateralUsd - usdValues.debtUsd + idleBalance / 1e6,
     idleUsdc: idleBalance,
-    suppliedUsdc: obligationData.usdcSupplied,
-    borrowedUsdc: obligationData.usdcBorrowed,
-    healthFactor: usdValues.healthFactor,
+    ctokenBalance,
+    suppliedUsdc,
+    borrowedUsdc,
+    healthFactor,
+    totalValueUsdc,
   };
 
   console.log(
@@ -110,15 +115,10 @@ async function pollCycle(loopCtx: LoopContext): Promise<void> {
       `HF: ${portfolio.healthFactor === Infinity ? "∞" : portfolio.healthFactor.toFixed(2)}`
   );
 
-  // ── Step 2: Read APYs ─────────────────────────────────────────────────
-  const apyData = await getReserveApys(connection, config.kaminoProgramId, {
-    usdc: config.usdcMint,
-    btc: config.btcMint,
-    sol: config.solMint,
-  });
-
-  const loopApys = computeAllLoopApys(
-    apyData,
+  // ── Step 2: Compute APYs (config-driven on the mock) ──────────────────
+  const loopApys = computeUsdcLoopApys(
+    bpsToDecimal(config.usdcSupplyApyBps),
+    bpsToDecimal(config.usdcBorrowApyBps),
     config.minLoopNetApyPct,
     config.maxLeverage
   );
@@ -126,7 +126,7 @@ async function pollCycle(loopCtx: LoopContext): Promise<void> {
   if (loopApys.length > 0) {
     const top = loopApys[0];
     console.log(
-      `  Best loop: ${top.asset} @ ${top.leverage}x → ${(top.netApy * 100).toFixed(2)}% net APY`
+      `  Best loop: USDC @ ${top.leverage}x → ${(top.netApy * 100).toFixed(2)}% net APY`
     );
   }
 
@@ -150,48 +150,53 @@ async function pollCycle(loopCtx: LoopContext): Promise<void> {
   }
 
   const actionCtx: KaminoActionContext = {
-    vaultProgram,
+    vaultProgram: loopCtx.vaultProgram,
     agentKeypair: config.agentKeypair,
-    vaultPda,
-    strategyPda,
-    strategyTokenPda,
-    vaultProgramId,
+    vaultPda: loopCtx.vaultPda,
+    strategyPda: loopCtx.strategyPda,
+    strategyTokenPda: loopCtx.strategyTokenPda,
+    strategyAuthorityPda,
+    vaultProgramId: loopCtx.vaultProgramId,
     kaminoProgramId: config.kaminoProgramId,
-    mint: config.usdcMint,
-    asset: ASSET_USDC,
+    liquidityMint: usdcMint,
+    strategyId: config.strategyId,
+    callerTokenAta: loopCtx.agentTokenAta,
+    delegateTokenAta: loopCtx.agentTokenAta,
   };
 
+  await executeDecision(decision, portfolio, reserve, actionCtx).catch((err) => {
+    console.error(`  [EXEC FAIL] ${decision.action}:`, err?.message || err);
+  });
+}
+
+async function executeDecision(
+  decision: ReturnType<typeof decideAllocation>,
+  portfolio: PortfolioState,
+  reserve: ReserveData,
+  ctx: KaminoActionContext
+): Promise<void> {
   switch (decision.action) {
     case "OPEN_LOOP": {
       const sigs = await openUsdcLoop(
-        actionCtx,
+        ctx,
         decision.amount,
         decision.targetLeverage,
         (msg) => console.log(`    ${msg}`)
       );
       console.log(`  Opened loop in ${sigs.length} txs`);
-      break;
+      return;
     }
-    case "CLOSE_LOOP": {
+    case "CLOSE_LOOP":
+    case "EMERGENCY_DELEVERAGE": {
       const sigs = await closeUsdcLoop(
-        actionCtx,
+        ctx,
         portfolio.borrowedUsdc,
-        portfolio.suppliedUsdc,
+        portfolio.ctokenBalance,
+        reserve,
         (msg) => console.log(`    ${msg}`)
       );
       console.log(`  Closed loop in ${sigs.length} txs`);
-      break;
-    }
-    case "EMERGENCY_DELEVERAGE": {
-      console.log("  Emergency deleverage — closing loop");
-      const sigs = await closeUsdcLoop(
-        actionCtx,
-        portfolio.borrowedUsdc,
-        portfolio.suppliedUsdc,
-        (msg) => console.log(`    ${msg}`)
-      );
-      console.log(`  Emergency unwind in ${sigs.length} txs`);
-      break;
+      return;
     }
     default:
       console.log(`  Action ${decision.action} not yet implemented`);
