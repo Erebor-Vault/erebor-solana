@@ -1,40 +1,98 @@
 /**
- * unwind-kamino-position.ts — Force-close a kamino_looper strategy's position.
+ * unwind-kamino-position.ts — Force-close a kamino_looper strategy's
+ * leveraged position via the same execute_action path the agent uses.
  *
- * Use this when a strategy has stranded funds in mock_kamino (e.g. an open_loop
- * partially executed and left collateral with no leverage). The script calls
- * the same execute_strategy_action sequence the agent would call internally,
- * signed by the agent's delegate keypair.
+ * Sequence (mirrors closeUsdcLoop in agent/kamino_looper):
+ *   - If borrowed > 0:
+ *       1. ctoken_for_repay = ceil(borrowed × ctoken_supply / total_liquidity) + 1
+ *       2. withdraw(ctoken_for_repay)   — turns cTokens into liquidity in strategy ATA
+ *       3. repay(borrowed)              — pays the obligation
+ *       4. withdraw(remaining_ctokens)  — sweep the rest
+ *   - If borrowed == 0:
+ *       1. withdraw(ctoken_balance)     — single sweep
  *
- * Sequence:
- *   - If borrowed > 0: withdraw(borrowed), repay(borrowed), withdraw(remaining)
- *   - If borrowed == 0: withdraw(supplied)
+ * Signed by the agent's delegate keypair (same one used by the running
+ * kamino_looper). Uses the exact 9-account top-level set + 8/9-account
+ * remaining_accounts that agent/kamino_looper builds, with strategy_authority
+ * acting as the inner-CPI signer.
  *
  * Usage:
- *   bunx ts-node scripts/unwind-kamino-position.ts \
+ *   bun scripts/unwind-kamino-position.ts \
  *     --delegate ./agent_keypair.json \
- *     --mint <USDC_MINT_ADDRESS> \
+ *     --mint <USDC> \
  *     --strategy-id 1
- *
- * The default --strategy-id is 1 because the kamino strategy is created as the
- * second strategy of the shared vault (Lulo is at slot 0).
  */
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { MyProject } from "../target/types/my_project";
-import { Keypair, PublicKey, Connection } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { Keypair, PublicKey, SystemProgram, Connection } from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import BN from "bn.js";
 import * as fs from "fs";
 import { createHash } from "crypto";
 
-// Asset code for USDC (must match mock_kamino enum order)
-const ASSET_USDC = 0;
+// =============================================================================
+// CONSTANTS — must match agent/kamino_looper/src/chain/vault.ts
+// =============================================================================
 
-// -------------------------------------------------------------------
-// CLI parsing
-// -------------------------------------------------------------------
+const KAMINO_DEPOSIT_IX = "deposit_reserve_liquidity_and_obligation_collateral";
+const KAMINO_WITHDRAW_IX = "withdraw_obligation_collateral_and_redeem_reserve_collateral";
+const KAMINO_BORROW_IX = "borrow_obligation_liquidity";
+const KAMINO_REPAY_IX = "repay_obligation_liquidity";
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function loadKeypair(path: string): Keypair {
+  const raw = JSON.parse(fs.readFileSync(path, "utf-8"));
+  return Keypair.fromSecretKey(Uint8Array.from(raw));
+}
+
+function anchorDiscriminator(name: string): Buffer {
+  return createHash("sha256").update(`global:${name}`).digest().subarray(0, 8);
+}
+
+interface ReserveData {
+  totalLiquidity: BN;
+  totalCollateralSupply: BN;
+}
+
+async function readReserve(
+  connection: Connection,
+  reservePda: PublicKey
+): Promise<ReserveData | null> {
+  const info = await connection.getAccountInfo(reservePda);
+  if (!info || info.data.length < 152) return null;
+  return {
+    totalLiquidity: new BN(info.data.subarray(8 + 128, 8 + 136), "le"),
+    totalCollateralSupply: new BN(info.data.subarray(8 + 136, 8 + 144), "le"),
+  };
+}
+
+async function readObligationDebt(
+  connection: Connection,
+  obligationPda: PublicKey
+): Promise<BN> {
+  const info = await connection.getAccountInfo(obligationPda);
+  if (!info || info.data.length < 80) return new BN(0);
+  return new BN(info.data.subarray(8 + 64, 8 + 72), "le");
+}
+
+async function readTokenBalance(connection: Connection, ata: PublicKey): Promise<BN> {
+  const info = await connection.getAccountInfo(ata);
+  if (!info || info.data.length < 72) return new BN(0);
+  return new BN(info.data.subarray(64, 72), "le");
+}
+
+// =============================================================================
+// CLI
+// =============================================================================
+
 function parseArgs() {
   const args = process.argv.slice(2);
   let delegatePath = "";
@@ -43,7 +101,6 @@ function parseArgs() {
   let strategyId = 1;
   let rpcUrl = "https://api.devnet.solana.com";
   let walletPath = "./id.json";
-  let kaminoProgramId = "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK";
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -53,166 +110,117 @@ function parseArgs() {
       case "--strategy-id":  strategyId = Number(args[++i]); break;
       case "--rpc":          rpcUrl = args[++i]; break;
       case "--wallet":       walletPath = args[++i]; break;
-      case "--kamino":       kaminoProgramId = args[++i]; break;
     }
   }
 
   if (!delegatePath || !mintAddress) {
     console.error("Error: --delegate and --mint are required");
-    console.error("Usage: bunx ts-node scripts/unwind-kamino-position.ts --delegate ./agent_keypair.json --mint <USDC>");
     process.exit(1);
   }
-
-  return { delegatePath, mintAddress, vaultId, strategyId, rpcUrl, walletPath, kaminoProgramId };
+  return { delegatePath, mintAddress, vaultId, strategyId, rpcUrl, walletPath };
 }
 
-function loadKeypair(path: string): Keypair {
-  const raw = JSON.parse(fs.readFileSync(path, "utf-8"));
-  return Keypair.fromSecretKey(Uint8Array.from(raw));
+// =============================================================================
+// EXECUTE_ACTION BUILDER
+// =============================================================================
+
+interface UnwindContext {
+  vaultProgram: Program<MyProject>;
+  kaminoProgramId: PublicKey;
+  delegate: Keypair;
+  vaultPda: PublicKey;
+  strategyPda: PublicKey;
+  strategyAuthorityPda: PublicKey;
+  strategyTokenPda: PublicKey;
+  strategyCollateralAta: PublicKey;
+  obligationPda: PublicKey;
+  reservePda: PublicKey;
+  collateralMintPda: PublicKey;
+  liquiditySupplyAta: PublicKey;
+  liquidityMint: PublicKey;
+  agentTokenAta: PublicKey;
+  strategyId: number;
 }
 
-function anchorDiscriminator(name: string): number[] {
-  const hash = createHash("sha256").update(`global:${name}`).digest();
-  return Array.from(hash.subarray(0, 8));
-}
-
-// Build instruction data for a kamino op: [8 disc][1 asset][8 amount LE]
-function buildKaminoData(disc: number[], asset: number, amount: number): Buffer {
-  const buf = Buffer.alloc(17);
-  Buffer.from(disc).copy(buf, 0);
-  buf.writeUInt8(asset, 8);
-  new BN(amount).toArrayLike(Buffer, "le", 8).copy(buf, 9);
-  return buf;
-}
-
-// -------------------------------------------------------------------
-// Read obligation from mock_kamino (raw bytes, no IDL dependency)
-// -------------------------------------------------------------------
-async function readObligation(
-  connection: Connection,
-  strategyTokenPda: PublicKey,
-  kaminoProgramId: PublicKey
-): Promise<{ supplied: number; borrowed: number } | null> {
-  const [obligationPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("obligation"), strategyTokenPda.toBuffer()],
-    kaminoProgramId
-  );
-  const info = await connection.getAccountInfo(obligationPda);
-  if (!info || info.data.length < 89) return null;
-  return {
-    supplied: Number(info.data.readBigUInt64LE(40)),
-    borrowed: Number(info.data.readBigUInt64LE(48)),
-  };
-}
-
-// -------------------------------------------------------------------
-// Find the AllowedAction PDA matching a kamino discriminator on this strategy
-// -------------------------------------------------------------------
-async function findAllowedAction(
-  vaultProgram: Program<MyProject>,
-  strategyPda: PublicKey,
-  actionCount: number,
-  kaminoProgramId: PublicKey,
-  discriminator: number[]
-): Promise<PublicKey | null> {
-  for (let i = 0; i < actionCount; i++) {
-    const [actionPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("allowed_action"),
-        strategyPda.toBuffer(),
-        new BN(i).toArrayLike(Buffer, "le", 2),
-      ],
-      vaultProgram.programId
-    );
-    try {
-      const acct = (await vaultProgram.account.allowedAction.fetch(actionPda)) as any;
-      if (
-        acct.targetProgram.equals(kaminoProgramId) &&
-        Buffer.from(acct.discriminator).equals(Buffer.from(discriminator)) &&
-        acct.isActive
-      ) {
-        return actionPda;
-      }
-    } catch {
-      // skip if fetch fails
-    }
-  }
-  return null;
-}
-
-// -------------------------------------------------------------------
-// Submit one execute_strategy_action call (deposit/withdraw/borrow/repay)
-// Post-adapter layout: mint, user_token, treasury, reserve, obligation,
-//                      oracle, position, user_authority, token_program
-// -------------------------------------------------------------------
-async function executeKaminoAction(
-  vaultProgram: Program<MyProject>,
-  delegate: Keypair,
-  vaultPda: PublicKey,
-  strategyPda: PublicKey,
-  strategyTokenPda: PublicKey,
-  allowedActionPda: PublicKey,
-  kaminoProgramId: PublicKey,
-  mint: PublicKey,
-  discriminator: number[],
-  amount: number
+async function executeAction(
+  ctx: UnwindContext,
+  ixName: string,
+  ixData: Buffer,
+  remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[]
 ): Promise<string> {
-  const [treasuryPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("treasury"), mint.toBuffer()],
-    kaminoProgramId
-  );
-  const [reservePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("reserve"), mint.toBuffer()],
-    kaminoProgramId
-  );
-  const [obligationPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("obligation"), strategyTokenPda.toBuffer()],
-    kaminoProgramId
-  );
-  const [oraclePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("prices")],
-    kaminoProgramId
-  );
-  const [positionPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("position"), strategyTokenPda.toBuffer()],
-    kaminoProgramId
+  const disc = anchorDiscriminator(ixName);
+  const [allowedActionPda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("allowed_action"),
+      ctx.strategyPda.toBuffer(),
+      ctx.kaminoProgramId.toBuffer(),
+      disc,
+    ],
+    ctx.vaultProgram.programId
   );
 
-  const remainingAccounts: any[] = [
-    { pubkey: mint, isSigner: false, isWritable: false },
-    { pubkey: strategyTokenPda, isSigner: false, isWritable: true },
-    { pubkey: treasuryPda, isSigner: false, isWritable: true },
-    { pubkey: reservePda, isSigner: false, isWritable: true },
-    { pubkey: obligationPda, isSigner: false, isWritable: true },
-    { pubkey: oraclePda, isSigner: false, isWritable: false },
-    { pubkey: positionPda, isSigner: false, isWritable: true },
-    { pubkey: vaultPda, isSigner: false, isWritable: false },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-  ];
-
-  const data = buildKaminoData(discriminator, ASSET_USDC, amount);
-
-  return vaultProgram.methods
-    .executeStrategyAction(data)
+  return ctx.vaultProgram.methods
+    .executeAction(
+      new BN(ctx.strategyId),
+      ctx.kaminoProgramId,
+      Array.from(disc) as any,
+      ixData
+    )
     .accountsStrict({
-      caller: delegate.publicKey,
-      vaultState: vaultPda,
-      strategy: strategyPda,
+      caller: ctx.delegate.publicKey,
+      vaultState: ctx.vaultPda,
+      strategy: ctx.strategyPda,
+      strategyAuthority: ctx.strategyAuthorityPda,
       allowedAction: allowedActionPda,
-      targetProgram: kaminoProgramId,
+      callerTokenAta: ctx.agentTokenAta,
+      delegateTokenAta: ctx.agentTokenAta,
+      targetProgramAccount: ctx.kaminoProgramId,
+      allowedOutputToken: SystemProgram.programId,
     })
     .remainingAccounts(remainingAccounts)
-    .signers([delegate])
+    .signers([ctx.delegate])
     .rpc();
 }
 
-// -------------------------------------------------------------------
-// Main
-// -------------------------------------------------------------------
+function withdrawAccounts(ctx: UnwindContext) {
+  // recipient_index = 1 → strategy ATA at slot 1.
+  return [
+    { pubkey: ctx.strategyCollateralAta, isSigner: false, isWritable: true },
+    { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
+    { pubkey: ctx.reservePda, isSigner: false, isWritable: true },
+    { pubkey: ctx.liquidityMint, isSigner: false, isWritable: false },
+    { pubkey: ctx.collateralMintPda, isSigner: false, isWritable: true },
+    { pubkey: ctx.liquiditySupplyAta, isSigner: false, isWritable: true },
+    { pubkey: ctx.strategyAuthorityPda, isSigner: false, isWritable: false },
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
+}
+
+function repayAccounts(ctx: UnwindContext) {
+  // recipient_index = 4 → strategy ATA at slot 4 (source_liquidity).
+  return [
+    { pubkey: ctx.obligationPda, isSigner: false, isWritable: true },
+    { pubkey: ctx.reservePda, isSigner: false, isWritable: true },
+    { pubkey: ctx.liquidityMint, isSigner: false, isWritable: false },
+    { pubkey: ctx.liquiditySupplyAta, isSigner: false, isWritable: true },
+    { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
+    { pubkey: ctx.strategyAuthorityPda, isSigner: false, isWritable: false },
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
+}
+
+function encodeAmount(amount: BN): Buffer {
+  return amount.toArrayLike(Buffer, "le", 8);
+}
+
+// =============================================================================
+// MAIN
+// =============================================================================
+
 async function main() {
   const opts = parseArgs();
 
-  const connection = new anchor.web3.Connection(opts.rpcUrl, "confirmed");
+  const connection = new Connection(opts.rpcUrl, "confirmed");
   const payer = loadKeypair(opts.walletPath);
   const delegate = loadKeypair(opts.delegatePath);
   const wallet = new anchor.Wallet(payer);
@@ -220,104 +228,138 @@ async function main() {
   anchor.setProvider(provider);
 
   const vaultProgram = anchor.workspace.myProject as Program<MyProject>;
-  const mint = new PublicKey(opts.mintAddress);
-  const kaminoProgramId = new PublicKey(opts.kaminoProgramId);
+  const liquidityMint = new PublicKey(opts.mintAddress);
+
+  // Derive kamino program id from the IDL on disk to avoid drift after
+  // anchor keys sync.
+  const kaminoIdl = JSON.parse(fs.readFileSync("./target/idl/mock_kamino.json", "utf-8"));
+  const kaminoProgramId = new PublicKey(kaminoIdl.address);
 
   console.log("\n=== Kamino Position Unwind ===\n");
-  console.log(`Delegate:   ${delegate.publicKey.toBase58()}`);
-  console.log(`Vault prog: ${vaultProgram.programId.toBase58()}`);
-  console.log(`Kamino:     ${kaminoProgramId.toBase58()}`);
-  console.log(`Mint:       ${mint.toBase58()}`);
-  console.log(`Vault ID:   ${opts.vaultId}`);
-  console.log(`Strategy:   ${opts.strategyId}\n`);
+  console.log(`Delegate:       ${delegate.publicKey.toBase58()}`);
+  console.log(`Vault program:  ${vaultProgram.programId.toBase58()}`);
+  console.log(`Kamino program: ${kaminoProgramId.toBase58()}`);
+  console.log(`Mint:           ${liquidityMint.toBase58()}`);
+  console.log(`Strategy:       ${opts.strategyId}\n`);
 
-  // Derive PDAs
+  // ── Derive all PDAs ─────────────────────────────────────────────────
   const [vaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), mint.toBuffer(), new BN(opts.vaultId).toArrayLike(Buffer, "le", 8)],
+    [Buffer.from("vault"), liquidityMint.toBuffer(), new BN(opts.vaultId).toArrayLike(Buffer, "le", 8)],
     vaultProgram.programId
   );
   const [strategyPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("strategy"), vaultPda.toBuffer(), new BN(opts.strategyId).toArrayLike(Buffer, "le", 8)],
     vaultProgram.programId
   );
+  const [strategyAuthorityPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("strategy_authority"), vaultPda.toBuffer(), new BN(opts.strategyId).toArrayLike(Buffer, "le", 8)],
+    vaultProgram.programId
+  );
   const [strategyTokenPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("strategy_token"), vaultPda.toBuffer(), new BN(opts.strategyId).toArrayLike(Buffer, "le", 8)],
     vaultProgram.programId
   );
+  const [reservePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("reserve"), liquidityMint.toBuffer()],
+    kaminoProgramId
+  );
+  const [collateralMintPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("collateral_mint"), liquidityMint.toBuffer()],
+    kaminoProgramId
+  );
+  const [obligationPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("obligation"), reservePda.toBuffer(), strategyAuthorityPda.toBuffer()],
+    kaminoProgramId
+  );
+  const liquiditySupplyAta = getAssociatedTokenAddressSync(liquidityMint, reservePda, true);
+  const strategyCollateralAta = getAssociatedTokenAddressSync(collateralMintPda, strategyAuthorityPda, true);
+  const agentTokenAta = getAssociatedTokenAddressSync(liquidityMint, delegate.publicKey);
 
-  console.log(`Vault PDA:        ${vaultPda.toBase58()}`);
-  console.log(`Strategy PDA:     ${strategyPda.toBase58()}`);
-  console.log(`Strategy Token:   ${strategyTokenPda.toBase58()}\n`);
+  // ── Read current state ──────────────────────────────────────────────
+  const [reserve, borrowed, ctokenBalance] = await Promise.all([
+    readReserve(connection, reservePda),
+    readObligationDebt(connection, obligationPda),
+    readTokenBalance(connection, strategyCollateralAta),
+  ]);
 
-  // Read current obligation
-  const obligation = await readObligation(connection, strategyTokenPda, kaminoProgramId);
-  if (!obligation) {
-    console.log("No obligation found — nothing to unwind.");
+  if (!reserve) {
+    console.log("Reserve NOT initialized — nothing to unwind.");
     return;
   }
 
+  const suppliedLiquidity = reserve.totalCollateralSupply.isZero()
+    ? new BN(0)
+    : ctokenBalance.mul(reserve.totalLiquidity).div(reserve.totalCollateralSupply);
   console.log(
-    `Current state: supplied=${(obligation.supplied / 1e6).toFixed(2)} USDC, borrowed=${(obligation.borrowed / 1e6).toFixed(2)} USDC`
+    `Current state: ctoken=${ctokenBalance.toString()} (${(Number(suppliedLiquidity) / 1e6).toFixed(2)} USDC supplied), borrowed=${(Number(borrowed) / 1e6).toFixed(2)} USDC`
   );
 
-  if (obligation.supplied === 0 && obligation.borrowed === 0) {
-    console.log("Position is already empty. Nothing to do.");
+  if (ctokenBalance.isZero() && borrowed.isZero()) {
+    console.log("Position is already empty.");
     return;
   }
 
-  // Look up allowed actions on this strategy
-  const strategy = (await vaultProgram.account.strategyAllocation.fetch(strategyPda)) as any;
-  const actionCount = strategy.actionCount;
-  console.log(`Strategy has ${actionCount} whitelisted actions\n`);
+  const ctx: UnwindContext = {
+    vaultProgram,
+    kaminoProgramId,
+    delegate,
+    vaultPda,
+    strategyPda,
+    strategyAuthorityPda,
+    strategyTokenPda,
+    strategyCollateralAta,
+    obligationPda,
+    reservePda,
+    collateralMintPda,
+    liquiditySupplyAta,
+    liquidityMint,
+    agentTokenAta,
+    strategyId: opts.strategyId,
+  };
 
-  const withdrawDisc = anchorDiscriminator("withdraw");
-  const repayDisc = anchorDiscriminator("repay");
+  let remainingCtokens = ctokenBalance;
 
-  const withdrawAction = await findAllowedAction(vaultProgram, strategyPda, actionCount, kaminoProgramId, withdrawDisc);
-  if (!withdrawAction) throw new Error("No active withdraw AllowedAction found on this strategy");
+  // ── Step 1: cover repay (only when there's outstanding debt) ────────
+  if (!borrowed.isZero() && !reserve.totalLiquidity.isZero() && !reserve.totalCollateralSupply.isZero()) {
+    // ctoken_for_repay = ceil(borrowed × ctoken_supply / total_liquidity) + 1
+    const ctokenForRepay = borrowed
+      .mul(reserve.totalCollateralSupply)
+      .add(reserve.totalLiquidity.subn(1))
+      .div(reserve.totalLiquidity)
+      .addn(1);
+    const ctokenToWithdraw = BN.min(ctokenForRepay, remainingCtokens);
 
-  let repayAction: PublicKey | null = null;
-  if (obligation.borrowed > 0) {
-    repayAction = await findAllowedAction(vaultProgram, strategyPda, actionCount, kaminoProgramId, repayDisc);
-    if (!repayAction) throw new Error("No active repay AllowedAction found on this strategy");
-  }
-
-  // ── Unwind sequence ──────────────────────────────────────────────────
-  if (obligation.borrowed > 0) {
-    // Step 1: withdraw enough collateral to repay debt
-    console.log(`1. Withdrawing ${(obligation.borrowed / 1e6).toFixed(2)} USDC to repay debt...`);
-    const sig1 = await executeKaminoAction(
-      vaultProgram, delegate, vaultPda, strategyPda, strategyTokenPda,
-      withdrawAction, kaminoProgramId, mint, withdrawDisc, obligation.borrowed
+    console.log(
+      `\n1. Withdrawing ${ctokenToWithdraw.toString()} cTokens (≈${(Number(borrowed) / 1e6).toFixed(2)} USDC) for repay…`
     );
+    const sig1 = await executeAction(ctx, KAMINO_WITHDRAW_IX, encodeAmount(ctokenToWithdraw), withdrawAccounts(ctx));
     console.log(`   tx: ${sig1}`);
+    remainingCtokens = remainingCtokens.sub(ctokenToWithdraw);
 
-    // Step 2: repay debt
-    console.log(`2. Repaying ${(obligation.borrowed / 1e6).toFixed(2)} USDC...`);
-    const sig2 = await executeKaminoAction(
-      vaultProgram, delegate, vaultPda, strategyPda, strategyTokenPda,
-      repayAction!, kaminoProgramId, mint, repayDisc, obligation.borrowed
-    );
+    console.log(`2. Repaying ${(Number(borrowed) / 1e6).toFixed(2)} USDC…`);
+    const sig2 = await executeAction(ctx, KAMINO_REPAY_IX, encodeAmount(borrowed), repayAccounts(ctx));
     console.log(`   tx: ${sig2}`);
   }
 
-  // Step 3: withdraw remaining collateral
-  const remaining = obligation.supplied - obligation.borrowed;
-  if (remaining > 0) {
-    console.log(`3. Withdrawing remaining ${(remaining / 1e6).toFixed(2)} USDC...`);
-    const sig3 = await executeKaminoAction(
-      vaultProgram, delegate, vaultPda, strategyPda, strategyTokenPda,
-      withdrawAction, kaminoProgramId, mint, withdrawDisc, remaining
-    );
+  // ── Step 2: sweep remaining cTokens ─────────────────────────────────
+  if (!remainingCtokens.isZero()) {
+    console.log(`\n3. Withdrawing remaining ${remainingCtokens.toString()} cTokens…`);
+    const sig3 = await executeAction(ctx, KAMINO_WITHDRAW_IX, encodeAmount(remainingCtokens), withdrawAccounts(ctx));
     console.log(`   tx: ${sig3}`);
   }
 
-  // Verify
-  const after = await readObligation(connection, strategyTokenPda, kaminoProgramId);
-  console.log("\n=== Done ===");
+  // ── Verify ──────────────────────────────────────────────────────────
+  const [borrowedAfter, ctokenAfter, idleAfter] = await Promise.all([
+    readObligationDebt(connection, obligationPda),
+    readTokenBalance(connection, strategyCollateralAta),
+    readTokenBalance(connection, strategyTokenPda),
+  ]);
   console.log(
-    `New state: supplied=${((after?.supplied || 0) / 1e6).toFixed(2)} USDC, borrowed=${((after?.borrowed || 0) / 1e6).toFixed(2)} USDC`
+    `\nFinal state: ctoken=${ctokenAfter.toString()}, borrowed=${(Number(borrowedAfter) / 1e6).toFixed(2)} USDC, idle=${(Number(idleAfter) / 1e6).toFixed(2)} USDC`
   );
+  if (ctokenAfter.isZero() && borrowedAfter.isZero()) {
+    console.log("Loop unwound cleanly. Funds are now in the strategy ATA — authority can deallocate to reserve.");
+  }
 }
 
 main().catch((err) => {
