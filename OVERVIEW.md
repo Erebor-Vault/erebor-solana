@@ -305,7 +305,7 @@ flowchart TB
     Intro[iterate Sysvar1nstructions...<br/>reject hostile siblings]
     Call[invoke_signed<br/>strategy_authority seeds]
     Anti{delegate.asset_ata.amount<br/>did not increase?}
-    Emit[increment action_count<br/>emit ActionExecuted]
+    Emit[emit ActionExecuted]
 
     Done([return])
     R1([NotDelegateNorAuthority])
