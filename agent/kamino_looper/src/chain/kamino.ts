@@ -1,78 +1,57 @@
-// kamino.ts — On-chain reads for the mock_kamino program.
+// kamino.ts — On-chain reads + PDA helpers for OLD_Erebor's mock_kamino.
 //
-// Reads obligations, reserves, and the price oracle directly from the
-// blockchain using raw byte deserialization (no Anchor IDL dependency on
-// mock_kamino — this keeps the agent decoupled from the program's IDL).
+// Single-mint reserve model: each Reserve PDA covers one liquidity_mint and
+// mints its own cToken (collateral_mint) at a 1:1 ratio that grows with
+// simulated yield. There is no oracle and no multi-asset price model — the
+// looper agent runs a single-asset (USDC self-loop) leveraged position.
+//
+// Layouts mirror programs/mock_kamino/src/lib.rs's `Reserve` and `Obligation`
+// structs.
 //
 // PDA seeds (must match mock_kamino):
-//   PriceOracle: ["prices"]
-//   Reserve:     ["reserve", token_mint]
-//   Obligation:  ["obligation", strategy_token_account]
-//   Treasury:    ["treasury", token_mint]
+//   Reserve:           ["reserve", liquidity_mint]
+//   CollateralMint:    ["collateral_mint", liquidity_mint]
+//   Obligation:        ["obligation", reserve, owner]    (owner = strategy_authority PDA)
 
 import { Connection, PublicKey } from "@solana/web3.js";
-import type { ApyData, Asset } from "../strategy/apyScanner.js";
-import { bpsToDecimal, microUsdToDollars } from "../utils/math.js";
-
-export interface ObligationData {
-  usdcSupplied: number;
-  usdcBorrowed: number;
-  btcSupplied: number;
-  btcBorrowed: number;
-  solSupplied: number;
-  solBorrowed: number;
-}
-
-export interface PriceOracleData {
-  usdcPrice: number; // micro-USD per token unit
-  btcPrice: number;
-  solPrice: number;
-}
-
-export interface ReserveData {
-  supplyApyBps: number;
-  borrowApyBps: number;
-  totalSupplied: number;
-  totalBorrowed: number;
-}
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 
 // =============================================================================
 // PDA DERIVATION
 // =============================================================================
 
-export function deriveKaminoOraclePda(programId: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync([Buffer.from("prices")], programId);
-  return pda;
-}
-
 export function deriveKaminoReservePda(
-  mint: PublicKey,
+  liquidityMint: PublicKey,
   programId: PublicKey
 ): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("reserve"), mint.toBuffer()],
+    [Buffer.from("reserve"), liquidityMint.toBuffer()],
     programId
   );
   return pda;
 }
 
-export function deriveKaminoTreasuryPda(
-  mint: PublicKey,
+export function deriveKaminoCollateralMintPda(
+  liquidityMint: PublicKey,
   programId: PublicKey
 ): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("treasury"), mint.toBuffer()],
+    [Buffer.from("collateral_mint"), liquidityMint.toBuffer()],
     programId
   );
   return pda;
 }
 
+// Per-(reserve, owner) borrow-tracking PDA. Owner is the account that signs
+// borrow/repay against the obligation — for the looper agent, that's the
+// strategy_authority[i] PDA.
 export function deriveKaminoObligationPda(
-  strategyTokenAccount: PublicKey,
+  reservePda: PublicKey,
+  owner: PublicKey,
   programId: PublicKey
 ): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("obligation"), strategyTokenAccount.toBuffer()],
+    [Buffer.from("obligation"), reservePda.toBuffer(), owner.toBuffer()],
     programId
   );
   return pda;
@@ -82,139 +61,118 @@ export function deriveKaminoObligationPda(
 // READS — raw byte deserialization
 // =============================================================================
 
-// PriceOracle layout (after 8-byte Anchor discriminator):
-//   bytes 8..40   admin (Pubkey)
-//   bytes 40..48  usdc_price (u64 LE)
-//   bytes 48..56  btc_price (u64 LE)
-//   bytes 56..64  sol_price (u64 LE)
-//   bytes 64..65  bump (u8)
-export async function fetchPriceOracle(
+export interface ReserveData {
+  admin: PublicKey;
+  liquidityMint: PublicKey;
+  collateralMint: PublicKey;
+  liquiditySupply: PublicKey;
+  totalLiquidity: number;
+  totalCollateralSupply: number;
+  totalBorrowed: number;
+}
+
+// Reserve layout (after 8-byte Anchor discriminator):
+//   bytes   8..40   admin                  (Pubkey, 32)
+//   bytes  40..72   liquidity_mint         (Pubkey, 32)
+//   bytes  72..104  collateral_mint        (Pubkey, 32)
+//   bytes 104..136  liquidity_supply       (Pubkey, 32)
+//   bytes 136..144  total_liquidity        (u64 LE)
+//   bytes 144..152  total_collateral_supply(u64 LE)
+//   bytes 152..160  total_borrowed         (u64 LE)
+//   bytes 160..161  bump                   (u8)
+//   bytes 161..162  collateral_mint_bump   (u8)
+//
+// Total size: 8 + 154 = 162 bytes.
+export async function fetchReserve(
   connection: Connection,
+  liquidityMint: PublicKey,
   programId: PublicKey
-): Promise<PriceOracleData | null> {
-  const pda = deriveKaminoOraclePda(programId);
+): Promise<ReserveData | null> {
+  const pda = deriveKaminoReservePda(liquidityMint, programId);
   const info = await connection.getAccountInfo(pda);
-  if (!info || info.data.length < 65) return null;
+  if (!info || info.data.length < 160) return null;
   return {
-    usdcPrice: Number(info.data.readBigUInt64LE(40)),
-    btcPrice: Number(info.data.readBigUInt64LE(48)),
-    solPrice: Number(info.data.readBigUInt64LE(56)),
+    admin: new PublicKey(info.data.subarray(8, 40)),
+    liquidityMint: new PublicKey(info.data.subarray(40, 72)),
+    collateralMint: new PublicKey(info.data.subarray(72, 104)),
+    liquiditySupply: new PublicKey(info.data.subarray(104, 136)),
+    totalLiquidity: Number(info.data.readBigUInt64LE(136)),
+    totalCollateralSupply: Number(info.data.readBigUInt64LE(144)),
+    totalBorrowed: Number(info.data.readBigUInt64LE(152)),
   };
 }
 
-// Reserve layout (after 8-byte discriminator):
-//   bytes 8..40   mint (Pubkey)
-//   bytes 40..72  supply_treasury (Pubkey)
-//   bytes 72..74  supply_apy_bps (u16 LE)
-//   bytes 74..76  borrow_apy_bps (u16 LE)
-//   bytes 76..84  total_supplied (u64 LE)
-//   bytes 84..92  total_borrowed (u64 LE)
-//   bytes 92..93  bump (u8)
-export async function fetchReserve(
-  connection: Connection,
-  mint: PublicKey,
-  programId: PublicKey
-): Promise<ReserveData | null> {
-  const pda = deriveKaminoReservePda(mint, programId);
-  const info = await connection.getAccountInfo(pda);
-  if (!info || info.data.length < 93) return null;
-  return {
-    supplyApyBps: info.data.readUInt16LE(72),
-    borrowApyBps: info.data.readUInt16LE(74),
-    totalSupplied: Number(info.data.readBigUInt64LE(76)),
-    totalBorrowed: Number(info.data.readBigUInt64LE(84)),
-  };
+export interface ObligationData {
+  reserve: PublicKey;
+  owner: PublicKey;
+  borrowedLiquidity: number;
 }
 
 // Obligation layout (after 8-byte discriminator):
-//   bytes 8..40   strategy_token_account (Pubkey)
-//   bytes 40..48  usdc_supplied (u64 LE)
-//   bytes 48..56  usdc_borrowed (u64 LE)
-//   bytes 56..64  btc_supplied (u64 LE)
-//   bytes 64..72  btc_borrowed (u64 LE)
-//   bytes 72..80  sol_supplied (u64 LE)
-//   bytes 80..88  sol_borrowed (u64 LE)
-//   bytes 88..89  bump (u8)
+//   bytes   8..40   reserve            (Pubkey)
+//   bytes  40..72   owner              (Pubkey)
+//   bytes  72..80   borrowed_liquidity (u64 LE)
+//   bytes  80..81   bump               (u8)
+//
+// Total size: 8 + 73 = 81 bytes.
 export async function fetchObligation(
   connection: Connection,
-  strategyTokenAccount: PublicKey,
+  reservePda: PublicKey,
+  owner: PublicKey,
   programId: PublicKey
 ): Promise<ObligationData | null> {
-  const pda = deriveKaminoObligationPda(strategyTokenAccount, programId);
-  const info = await connection.getAccountInfo(pda);
-  if (!info || info.data.length < 89) return null;
+  const obligationPda = deriveKaminoObligationPda(reservePda, owner, programId);
+  const info = await connection.getAccountInfo(obligationPda);
+  if (!info || info.data.length < 80) return null;
   return {
-    usdcSupplied: Number(info.data.readBigUInt64LE(40)),
-    usdcBorrowed: Number(info.data.readBigUInt64LE(48)),
-    btcSupplied: Number(info.data.readBigUInt64LE(56)),
-    btcBorrowed: Number(info.data.readBigUInt64LE(64)),
-    solSupplied: Number(info.data.readBigUInt64LE(72)),
-    solBorrowed: Number(info.data.readBigUInt64LE(80)),
+    reserve: new PublicKey(info.data.subarray(8, 40)),
+    owner: new PublicKey(info.data.subarray(40, 72)),
+    borrowedLiquidity: Number(info.data.readBigUInt64LE(72)),
   };
 }
 
 // =============================================================================
-// HIGH-LEVEL HELPERS
+// CTOKEN HELPERS
 // =============================================================================
 
-// Fetch all reserves and convert APYs from bps to decimal.
-export async function getReserveApys(
+// Compute the supplied-underlying value implied by a strategy's cToken balance.
+// mock_kamino's deposit handler mints cTokens at the rate
+//   ctokens = liquidity_amount × ctoken_supply / total_liquidity
+// so the inverse — current underlying value — is:
+//   liquidity = ctoken_balance × total_liquidity / ctoken_supply
+// which grows over time as simulate_yield raises total_liquidity.
+//
+// Returns 0 when the cToken ATA doesn't exist or the reserve has no supply.
+export async function fetchSuppliedLiquidity(
   connection: Connection,
-  programId: PublicKey,
-  mints: { usdc: PublicKey; btc: PublicKey; sol: PublicKey }
-): Promise<ApyData[]> {
-  const [usdcRes, btcRes, solRes] = await Promise.all([
-    fetchReserve(connection, mints.usdc, programId),
-    fetchReserve(connection, mints.btc, programId),
-    fetchReserve(connection, mints.sol, programId),
-  ]);
+  liquidityMint: PublicKey,
+  strategyAuthority: PublicKey,
+  programId: PublicKey
+): Promise<{ ctokenBalance: number; suppliedLiquidity: number } | null> {
+  const reserve = await fetchReserve(connection, liquidityMint, programId);
+  if (!reserve) return null;
 
-  const result: ApyData[] = [];
-  if (usdcRes) {
-    result.push({
-      asset: "USDC",
-      supplyApy: bpsToDecimal(usdcRes.supplyApyBps),
-      borrowApy: bpsToDecimal(usdcRes.borrowApyBps),
-    });
+  const collateralMintPda = deriveKaminoCollateralMintPda(liquidityMint, programId);
+  const ctokenAta = getAssociatedTokenAddressSync(
+    collateralMintPda,
+    strategyAuthority,
+    true
+  );
+  const balanceResult = await connection
+    .getTokenAccountBalance(ctokenAta)
+    .catch(() => null);
+  const ctokenBalance = balanceResult ? Number(balanceResult.value.amount) : 0;
+
+  if (
+    ctokenBalance === 0 ||
+    reserve.totalCollateralSupply === 0 ||
+    reserve.totalLiquidity === 0
+  ) {
+    return { ctokenBalance, suppliedLiquidity: 0 };
   }
-  if (btcRes) {
-    result.push({
-      asset: "BTC",
-      supplyApy: bpsToDecimal(btcRes.supplyApyBps),
-      borrowApy: bpsToDecimal(btcRes.borrowApyBps),
-    });
-  }
-  if (solRes) {
-    result.push({
-      asset: "SOL",
-      supplyApy: bpsToDecimal(solRes.supplyApyBps),
-      borrowApy: bpsToDecimal(solRes.borrowApyBps),
-    });
-  }
-  return result;
-}
 
-// Compute USD value of an obligation using the on-chain prices.
-export function obligationUsdValues(
-  obligation: ObligationData,
-  prices: PriceOracleData
-): {
-  collateralUsd: number;
-  debtUsd: number;
-  healthFactor: number;
-} {
-  const collateralMicroUsd =
-    obligation.usdcSupplied * prices.usdcPrice +
-    obligation.btcSupplied * prices.btcPrice +
-    obligation.solSupplied * prices.solPrice;
-  const debtMicroUsd =
-    obligation.usdcBorrowed * prices.usdcPrice +
-    obligation.btcBorrowed * prices.btcPrice +
-    obligation.solBorrowed * prices.solPrice;
-
-  const collateralUsd = microUsdToDollars(collateralMicroUsd);
-  const debtUsd = microUsdToDollars(debtMicroUsd);
-  const healthFactor = debtUsd > 0 ? collateralUsd / debtUsd : Infinity;
-
-  return { collateralUsd, debtUsd, healthFactor };
+  const suppliedLiquidity = Math.floor(
+    (ctokenBalance * reserve.totalLiquidity) / reserve.totalCollateralSupply
+  );
+  return { ctokenBalance, suppliedLiquidity };
 }

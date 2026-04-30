@@ -1,8 +1,8 @@
-// vault-client.ts — Shared PDA derivation, Anchor program init, and on-chain reads.
+// vault-client.ts — PDA derivation, Anchor program init, and on-chain reads.
 //
-// Used by all agents in the agent/ folder. Protocol-agnostic — only knows about
-// the Erebor vault program's account layout. Each PDA function takes programId
-// as a parameter so agents can configure it from their own .env.
+// Used by all agents in the agent/ folder. Protocol-agnostic — only knows
+// about the Erebor vault program's account layout. Each PDA function takes
+// programId as a parameter so agents can configure it from their own .env.
 
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
@@ -18,7 +18,7 @@ import type { MyProject } from "../../target/types/my_project.js";
 import idl from "../../target/idl/my_project.json" with { type: "json" };
 
 // =============================================================================
-// PDA DERIVATION — all take programId as parameter
+// PDA DERIVATION
 // =============================================================================
 
 export function deriveVaultPda(
@@ -28,6 +28,17 @@ export function deriveVaultPda(
 ): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), tokenMint.toBuffer(), new BN(vaultId).toArrayLike(Buffer, "le", 8)],
+    programId
+  );
+  return pda;
+}
+
+export function deriveVaultAuthorityPda(
+  vaultPda: PublicKey,
+  programId: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_authority"), vaultPda.toBuffer()],
     programId
   );
   return pda;
@@ -45,6 +56,24 @@ export function deriveStrategyPda(
   return pda;
 }
 
+// strategy_authority[i] — owns the strategy ATA, signs the inner CPI inside
+// execute_action. Compromise of this PDA is bounded to strategy i's funds.
+export function deriveStrategyAuthorityPda(
+  vaultPda: PublicKey,
+  strategyId: number,
+  programId: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("strategy_authority"),
+      vaultPda.toBuffer(),
+      new BN(strategyId).toArrayLike(Buffer, "le", 8),
+    ],
+    programId
+  );
+  return pda;
+}
+
 export function deriveStrategyTokenPda(
   vaultPda: PublicKey,
   strategyId: number,
@@ -57,18 +86,35 @@ export function deriveStrategyTokenPda(
   return pda;
 }
 
+// AllowedAction PDA seeds: ["allowed_action", strategy, target_program, discriminator].
+// Deterministic — no scan needed. The admin must have called add_allowed_action
+// with the same (target_program, discriminator) before execute_action will
+// accept the call.
 export function deriveAllowedActionPda(
   strategyPda: PublicKey,
-  actionId: number,
+  targetProgram: PublicKey,
+  discriminator: number[] | Uint8Array,
   programId: PublicKey
 ): PublicKey {
+  const disc = discriminator instanceof Uint8Array ? discriminator : Uint8Array.from(discriminator);
+  if (disc.length !== 8) {
+    throw new Error(`Discriminator must be 8 bytes, got ${disc.length}`);
+  }
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("allowed_action"), strategyPda.toBuffer(), new BN(actionId).toArrayLike(Buffer, "le", 2)],
+    [
+      Buffer.from("allowed_action"),
+      strategyPda.toBuffer(),
+      targetProgram.toBuffer(),
+      Buffer.from(disc),
+    ],
     programId
   );
   return pda;
 }
 
+// Protocol-side PDA — used by mock_lulo's per-strategy ProtocolPosition tracker
+// at seeds ["position", strategy_token_account]. Kept here because the lulo
+// agent reads it to compute principal/yield.
 export function deriveProtocolPositionPda(
   strategyTokenPda: PublicKey,
   protocolProgramId: PublicKey
@@ -128,6 +174,10 @@ export async function fetchTokenBalance(
   return Number(result.value.amount);
 }
 
+// Reads mock_lulo's ProtocolPosition account. Layout (after 8-byte discriminator):
+//   bytes 8..40   strategy_token_account (Pubkey)
+//   bytes 40..48  deposited_amount (u64 LE)
+//   bytes 48..49  bump (u8)
 export async function fetchProtocolPosition(
   connection: Connection,
   positionPda: PublicKey
@@ -135,38 +185,4 @@ export async function fetchProtocolPosition(
   const info = await connection.getAccountInfo(positionPda);
   if (!info || info.data.length < 48) return 0;
   return Number(info.data.readBigUInt64LE(40));
-}
-
-export async function findAllowedActionByDiscriminator(
-  program: Program<MyProject>,
-  strategyPda: PublicKey,
-  actionCount: number,
-  targetProgram: PublicKey,
-  discriminator: number[],
-  programId: PublicKey
-): Promise<{ pda: PublicKey; action: AllowedActionAccount } | null> {
-  for (let i = 0; i < actionCount; i++) {
-    const pda = deriveAllowedActionPda(strategyPda, i, programId);
-    try {
-      const action = await fetchAllowedAction(program, pda);
-      if (
-        action.isActive &&
-        action.targetProgram.equals(targetProgram) &&
-        arraysEqual(action.discriminator, discriminator)
-      ) {
-        return { pda, action };
-      }
-    } catch {
-      // Action may not exist or was closed
-    }
-  }
-  return null;
-}
-
-function arraysEqual(a: number[], b: number[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }

@@ -1,174 +1,325 @@
-// vault.ts — Builds execute_strategy_action transactions for the kamino_looper.
+// vault.ts — Builds execute_action transactions for the kamino_looper.
 //
-// Each kamino operation (deposit, withdraw, borrow, repay) becomes one
-// execute_strategy_action call wrapped in a transaction. The vault validates
-// the action against the AllowedAction whitelist, then CPIs into mock_kamino
-// signing as the vault PDA.
+// Each kamino operation (deposit/withdraw/borrow/repay) becomes one
+// execute_action call wrapped in a transaction. The vault validates the
+// (strategy, target_program, discriminator) triple against an on-chain
+// AllowedAction PDA, signs the inner CPI as strategy_authority[i], and
+// runs the anti-theft snapshot on caller's + delegate's underlying ATAs.
 //
-// Anchor instruction discriminators are computed from sha256("global:<name>")[0..8].
+// Discriminator naming: must match Anchor's sha256("global:<method>")[..8]
+// for the OLD_Erebor mock_kamino instruction names. add_allowed_action must
+// have been called with the same (target_program, discriminator) tuples
+// before any of these helpers will succeed — see scripts/setup-kamino-strategy.ts.
 
 import { Program } from "@coral-xyz/anchor";
-import { Connection, PublicKey, TransactionSignature } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  PublicKey,
+  SystemProgram,
+  TransactionSignature,
+  Keypair,
+} from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import BN from "bn.js";
 import { createHash } from "crypto";
 import type { MyProject } from "../../../../target/types/my_project.js";
-import { findAllowedActionByDiscriminator } from "../../../shared/vault-client.js";
+import { deriveAllowedActionPda } from "../../../shared/vault-client.js";
 import {
+  deriveKaminoCollateralMintPda,
   deriveKaminoObligationPda,
-  deriveKaminoOraclePda,
   deriveKaminoReservePda,
-  deriveKaminoTreasuryPda,
 } from "./kamino.js";
 
-// Asset codes (must match mock_kamino enum order)
-export const ASSET_USDC = 0;
-export const ASSET_BTC = 1;
-export const ASSET_SOL = 2;
+// =============================================================================
+// DISCRIMINATORS
+// =============================================================================
 
-export type AssetCode = 0 | 1 | 2;
-
-function anchorDiscriminator(name: string): number[] {
-  const hash = createHash("sha256").update(`global:${name}`).digest();
-  return Array.from(hash.subarray(0, 8));
+export function anchorDiscriminator(name: string): Buffer {
+  return createHash("sha256").update(`global:${name}`).digest().subarray(0, 8);
 }
 
-export const KAMINO_DEPOSIT_DISCRIMINATOR = anchorDiscriminator("deposit");
-export const KAMINO_WITHDRAW_DISCRIMINATOR = anchorDiscriminator("withdraw");
-export const KAMINO_BORROW_DISCRIMINATOR = anchorDiscriminator("borrow");
-export const KAMINO_REPAY_DISCRIMINATOR = anchorDiscriminator("repay");
+// OLD_Erebor mock_kamino instruction names. Must match the Anchor handlers
+// exactly — change here breaks the AllowedAction PDA seeds.
+export const KAMINO_DEPOSIT_IX_NAME =
+  "deposit_reserve_liquidity_and_obligation_collateral";
+export const KAMINO_WITHDRAW_IX_NAME =
+  "withdraw_obligation_collateral_and_redeem_reserve_collateral";
+export const KAMINO_BORROW_IX_NAME = "borrow_obligation_liquidity";
+export const KAMINO_REPAY_IX_NAME = "repay_obligation_liquidity";
 
-// Build the instruction data for a kamino operation:
-//   [8-byte discriminator][1-byte asset][8-byte amount LE]
-function buildKaminoInstructionData(
-  discriminator: number[],
-  asset: AssetCode,
-  amount: number
-): Buffer {
-  const buf = Buffer.alloc(17);
-  Buffer.from(discriminator).copy(buf, 0);
-  buf.writeUInt8(asset, 8);
-  new BN(amount).toArrayLike(Buffer, "le", 8).copy(buf, 9);
-  return buf;
-}
+export const KAMINO_DEPOSIT_DISCRIMINATOR = anchorDiscriminator(
+  KAMINO_DEPOSIT_IX_NAME
+);
+export const KAMINO_WITHDRAW_DISCRIMINATOR = anchorDiscriminator(
+  KAMINO_WITHDRAW_IX_NAME
+);
+export const KAMINO_BORROW_DISCRIMINATOR =
+  anchorDiscriminator(KAMINO_BORROW_IX_NAME);
+export const KAMINO_REPAY_DISCRIMINATOR =
+  anchorDiscriminator(KAMINO_REPAY_IX_NAME);
+
+// =============================================================================
+// CONTEXT
+// =============================================================================
 
 export interface KaminoActionContext {
   vaultProgram: Program<MyProject>;
-  agentKeypair: import("@solana/web3.js").Keypair;
+  agentKeypair: Keypair;
   vaultPda: PublicKey;
   strategyPda: PublicKey;
-  strategyTokenPda: PublicKey;
+  strategyTokenPda: PublicKey;          // strategy's underlying ATA
+  strategyAuthorityPda: PublicKey;      // signs the inner CPI
   vaultProgramId: PublicKey;
   kaminoProgramId: PublicKey;
-  mint: PublicKey;
-  asset: AssetCode;
+  liquidityMint: PublicKey;             // vault's underlying mint (e.g. USDC)
+  strategyId: number;
+  // Caller's + delegate's underlying ATAs — both are anti-theft snapshot
+  // points. When agent == delegate (the common case), both equal the agent's
+  // own ATA. Both must already exist on-chain; setup script creates the
+  // agent's USDC ATA before the agent first runs.
+  callerTokenAta: PublicKey;
+  delegateTokenAta: PublicKey;
 }
 
-// Derive the ProtocolPosition PDA for a given strategy token account.
-// Kept in sync with the obligation by mock_kamino on every state change
-// (ERC-4626 totalAssets adapter).
-function deriveKaminoPositionPda(
-  strategyTokenAccount: PublicKey,
-  kaminoProgramId: PublicKey
-): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("position"), strategyTokenAccount.toBuffer()],
-    kaminoProgramId
-  );
-  return pda;
+// =============================================================================
+// CORE BUILDER
+// =============================================================================
+
+interface ExecuteActionArgs {
+  ctx: KaminoActionContext;
+  discriminator: Buffer;
+  ixData: Buffer;                              // body only — no discriminator prefix
+  remainingAccounts: {
+    pubkey: PublicKey;
+    isSigner: boolean;
+    isWritable: boolean;
+  }[];
 }
 
-// Send a kamino deposit/withdraw/borrow/repay through execute_strategy_action.
-// Looks up the AllowedAction PDA matching the discriminator, builds the CPI
-// remaining_accounts (matching mock_kamino's expected layout), and submits.
-export async function executeKaminoAction(
-  ctx: KaminoActionContext,
-  discriminator: number[],
-  amount: number
+async function executeKaminoAction(
+  args: ExecuteActionArgs
 ): Promise<TransactionSignature> {
-  // Find the matching AllowedAction
-  const strategy = await ctx.vaultProgram.account.strategyAllocation.fetch(
-    ctx.strategyPda
-  );
-  const found = await findAllowedActionByDiscriminator(
-    ctx.vaultProgram,
+  const { ctx, discriminator, ixData, remainingAccounts } = args;
+
+  const allowedActionPda = deriveAllowedActionPda(
     ctx.strategyPda,
-    (strategy as any).actionCount,
     ctx.kaminoProgramId,
     discriminator,
     ctx.vaultProgramId
   );
-  if (!found) {
-    throw new Error(
-      `No active AllowedAction found for kamino action on program ${ctx.kaminoProgramId.toBase58()}`
-    );
-  }
-
-  const treasuryPda = deriveKaminoTreasuryPda(ctx.mint, ctx.kaminoProgramId);
-  const reservePda = deriveKaminoReservePda(ctx.mint, ctx.kaminoProgramId);
-  const obligationPda = deriveKaminoObligationPda(
-    ctx.strategyTokenPda,
-    ctx.kaminoProgramId
-  );
-  const oraclePda = deriveKaminoOraclePda(ctx.kaminoProgramId);
-  const positionPda = deriveKaminoPositionPda(ctx.strategyTokenPda, ctx.kaminoProgramId);
-
-  // Build remaining_accounts matching mock_kamino's Deposit/Withdraw/Borrow/Repay
-  // account structs. After the ProtocolPosition adapter change, all 4 handlers
-  // share the same layout:
-  //   mint, user_token_account, treasury, reserve, obligation, oracle, position, user_authority, token_program
-  const remainingAccounts = [
-    { pubkey: ctx.mint, isSigner: false, isWritable: false },
-    { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
-    { pubkey: treasuryPda, isSigner: false, isWritable: true },
-    { pubkey: reservePda, isSigner: false, isWritable: true },
-    { pubkey: obligationPda, isSigner: false, isWritable: true },
-    { pubkey: oraclePda, isSigner: false, isWritable: false },
-    { pubkey: positionPda, isSigner: false, isWritable: true },
-    { pubkey: ctx.vaultPda, isSigner: false, isWritable: false }, // user_authority (vault PDA)
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-  ];
-
-  const instructionData = buildKaminoInstructionData(discriminator, ctx.asset, amount);
 
   return await ctx.vaultProgram.methods
-    .executeStrategyAction(instructionData)
+    .executeAction(
+      new BN(ctx.strategyId),
+      ctx.kaminoProgramId,
+      Array.from(discriminator) as any,
+      ixData
+    )
     .accountsStrict({
       caller: ctx.agentKeypair.publicKey,
       vaultState: ctx.vaultPda,
       strategy: ctx.strategyPda,
-      allowedAction: found.pda,
-      targetProgram: ctx.kaminoProgramId,
+      strategyAuthority: ctx.strategyAuthorityPda,
+      allowedAction: allowedActionPda,
+      callerTokenAta: ctx.callerTokenAta,
+      delegateTokenAta: ctx.delegateTokenAta,
+      targetProgramAccount: ctx.kaminoProgramId,
+      // output_mint_index is None for all kamino actions, so the vault
+      // doesn't read this account. Pass any program-owned account as a
+      // placeholder per the Anchor IDL's allowance.
+      allowedOutputToken: SystemProgram.programId,
     })
     .remainingAccounts(remainingAccounts)
     .signers([ctx.agentKeypair])
     .rpc();
 }
 
+// =============================================================================
+// PER-ACTION HELPERS
+// =============================================================================
+
+// Pack a single u64 amount little-endian as the ix_data body.
+function encodeAmount(amount: number | BN): Buffer {
+  return new BN(amount).toArrayLike(Buffer, "le", 8);
+}
+
+// Build the ATAs and reserve PDAs that all four kamino actions share.
+function buildSharedAccounts(ctx: KaminoActionContext) {
+  const reservePda = deriveKaminoReservePda(ctx.liquidityMint, ctx.kaminoProgramId);
+  const collateralMint = deriveKaminoCollateralMintPda(
+    ctx.liquidityMint,
+    ctx.kaminoProgramId
+  );
+  const liquiditySupplyAta = getAssociatedTokenAddressSync(
+    ctx.liquidityMint,
+    reservePda,
+    true // allowOwnerOffCurve — reserve PDA is off-curve
+  );
+  const strategyCollateralAta = getAssociatedTokenAddressSync(
+    collateralMint,
+    ctx.strategyAuthorityPda,
+    true
+  );
+  return { reservePda, collateralMint, liquiditySupplyAta, strategyCollateralAta };
+}
+
+// deposit_reserve_liquidity_and_obligation_collateral
+//
+//   remaining_accounts (recipient_index = 0):
+//     0  source_liquidity (mut)        = strategy ATA
+//     1  destination_collateral (mut)  = strategy cToken ATA
+//     2  reserve (mut)
+//     3  liquidity_mint
+//     4  collateral_mint (mut)
+//     5  liquidity_supply (mut)
+//     6  user_transfer_authority       = strategy_authority (marked signer by execute_action)
+//     7  token_program
 export async function kaminoDeposit(
   ctx: KaminoActionContext,
-  amount: number
+  amount: number | BN
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_DEPOSIT_DISCRIMINATOR, amount);
+  const sa = buildSharedAccounts(ctx);
+  return executeKaminoAction({
+    ctx,
+    discriminator: KAMINO_DEPOSIT_DISCRIMINATOR,
+    ixData: encodeAmount(amount),
+    remainingAccounts: [
+      { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
+      { pubkey: sa.strategyCollateralAta, isSigner: false, isWritable: true },
+      { pubkey: sa.reservePda, isSigner: false, isWritable: true },
+      { pubkey: ctx.liquidityMint, isSigner: false, isWritable: false },
+      { pubkey: sa.collateralMint, isSigner: false, isWritable: true },
+      { pubkey: sa.liquiditySupplyAta, isSigner: false, isWritable: true },
+      { pubkey: ctx.strategyAuthorityPda, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+  });
 }
 
+// withdraw_obligation_collateral_and_redeem_reserve_collateral
+//
+// `amount` here is the cToken (collateral) amount to burn. The mock_kamino
+// handler returns the corresponding liquidity at the current redemption rate.
+//
+//   remaining_accounts (recipient_index = 1):
+//     0  source_collateral (mut)       = strategy cToken ATA
+//     1  destination_liquidity (mut)   = strategy ATA
+//     2  reserve (mut)
+//     3  liquidity_mint
+//     4  collateral_mint (mut)
+//     5  liquidity_supply (mut)
+//     6  user_transfer_authority       = strategy_authority
+//     7  token_program
 export async function kaminoWithdraw(
   ctx: KaminoActionContext,
-  amount: number
+  collateralAmount: number | BN
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_WITHDRAW_DISCRIMINATOR, amount);
+  const sa = buildSharedAccounts(ctx);
+  return executeKaminoAction({
+    ctx,
+    discriminator: KAMINO_WITHDRAW_DISCRIMINATOR,
+    ixData: encodeAmount(collateralAmount),
+    remainingAccounts: [
+      { pubkey: sa.strategyCollateralAta, isSigner: false, isWritable: true },
+      { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
+      { pubkey: sa.reservePda, isSigner: false, isWritable: true },
+      { pubkey: ctx.liquidityMint, isSigner: false, isWritable: false },
+      { pubkey: sa.collateralMint, isSigner: false, isWritable: true },
+      { pubkey: sa.liquiditySupplyAta, isSigner: false, isWritable: true },
+      { pubkey: ctx.strategyAuthorityPda, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+  });
 }
 
+// borrow_obligation_liquidity
+//
+//   remaining_accounts (recipient_index = 4):
+//     0  obligation (mut)              = ["obligation", reserve, strategy_authority]
+//     1  reserve (mut)
+//     2  liquidity_mint
+//     3  liquidity_supply (mut)
+//     4  destination_liquidity (mut)   = strategy ATA
+//     5  collateral_mint
+//     6  collateral_token_account      = strategy cToken ATA (read for HF check)
+//     7  owner                         = strategy_authority (signer)
+//     8  token_program
 export async function kaminoBorrow(
   ctx: KaminoActionContext,
-  amount: number
+  amount: number | BN
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_BORROW_DISCRIMINATOR, amount);
+  const sa = buildSharedAccounts(ctx);
+  const obligationPda = deriveKaminoObligationPda(
+    sa.reservePda,
+    ctx.strategyAuthorityPda,
+    ctx.kaminoProgramId
+  );
+  return executeKaminoAction({
+    ctx,
+    discriminator: KAMINO_BORROW_DISCRIMINATOR,
+    ixData: encodeAmount(amount),
+    remainingAccounts: [
+      { pubkey: obligationPda, isSigner: false, isWritable: true },
+      { pubkey: sa.reservePda, isSigner: false, isWritable: true },
+      { pubkey: ctx.liquidityMint, isSigner: false, isWritable: false },
+      { pubkey: sa.liquiditySupplyAta, isSigner: false, isWritable: true },
+      { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
+      { pubkey: sa.collateralMint, isSigner: false, isWritable: false },
+      { pubkey: sa.strategyCollateralAta, isSigner: false, isWritable: false },
+      { pubkey: ctx.strategyAuthorityPda, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+  });
 }
 
+// repay_obligation_liquidity
+//
+//   remaining_accounts (recipient_index = 4):
+//     0  obligation (mut)
+//     1  reserve (mut)
+//     2  liquidity_mint
+//     3  liquidity_supply (mut)
+//     4  source_liquidity (mut)        = strategy ATA
+//     5  user_transfer_authority       = strategy_authority (signer)
+//     6  token_program
 export async function kaminoRepay(
   ctx: KaminoActionContext,
-  amount: number
+  amount: number | BN
 ): Promise<TransactionSignature> {
-  return executeKaminoAction(ctx, KAMINO_REPAY_DISCRIMINATOR, amount);
+  const sa = buildSharedAccounts(ctx);
+  const obligationPda = deriveKaminoObligationPda(
+    sa.reservePda,
+    ctx.strategyAuthorityPda,
+    ctx.kaminoProgramId
+  );
+  return executeKaminoAction({
+    ctx,
+    discriminator: KAMINO_REPAY_DISCRIMINATOR,
+    ixData: encodeAmount(amount),
+    remainingAccounts: [
+      { pubkey: obligationPda, isSigner: false, isWritable: true },
+      { pubkey: sa.reservePda, isSigner: false, isWritable: true },
+      { pubkey: ctx.liquidityMint, isSigner: false, isWritable: false },
+      { pubkey: sa.liquiditySupplyAta, isSigner: false, isWritable: true },
+      { pubkey: ctx.strategyTokenPda, isSigner: false, isWritable: true },
+      { pubkey: ctx.strategyAuthorityPda, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+  });
 }
+
+// =============================================================================
+// SHARED-ACCOUNT EXPORTS (used by tests + setup scripts)
+// =============================================================================
+
+// Recipient indices for the four actions — must match what
+// add_allowed_action(...) is called with during setup. Off-by-one here means
+// every execute_action call reverts with RecipientMismatch.
+export const KAMINO_RECIPIENT_INDEX = {
+  deposit: 0,                       // source_liquidity = strategy ATA
+  withdraw: 1,                      // destination_liquidity = strategy ATA
+  borrow: 4,                        // destination_liquidity = strategy ATA
+  repay: 4,                         // source_liquidity = strategy ATA
+} as const;

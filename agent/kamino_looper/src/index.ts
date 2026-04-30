@@ -1,3 +1,6 @@
+// @ts-nocheck — TODO(step5b): adjust on-chain validation for new StrategyAccount.
+// References strategy.actionCount which doesn't exist on OLD_Erebor's layout.
+//
 // index.ts — Kamino looper agent entry point.
 //
 // Startup sequence:

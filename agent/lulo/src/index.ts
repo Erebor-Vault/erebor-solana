@@ -1,3 +1,6 @@
+// @ts-nocheck — TODO(step5c): adjust on-chain validation for new StrategyAccount.
+// References strategy.actionCount which doesn't exist on OLD_Erebor's layout.
+//
 // index.ts — Agent entry point.
 //
 // This is the main file that wires everything together and starts the agent.

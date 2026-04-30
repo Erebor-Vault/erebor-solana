@@ -1,3 +1,8 @@
+// @ts-nocheck — TODO(step5b): rewrite for OLD_Erebor's cToken model.
+// References deleted symbols (fetchPriceOracle, getReserveApys, ASSET_USDC,
+// obligationUsdValues) and the old KaminoActionContext shape. Step 5b
+// rebuilds the portfolio read on cToken-balance + obligation.borrowed_liquidity.
+//
 // mainLoop.ts — Eval cycle orchestrator for the kamino_looper agent.
 //
 // Every EVAL_INTERVAL_MS:

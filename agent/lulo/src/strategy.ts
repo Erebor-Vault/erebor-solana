@@ -1,3 +1,10 @@
+// @ts-nocheck — TODO(step5c): rewrite for OLD_Erebor's execute_action.
+// Currently calls executeStrategyAction (deleted) with a single-blob ix_data
+// and uses the old findAllowedActionByDiscriminator scan helper. Step 5c
+// switches to executeAction(strategy_id, target_program, disc, body) with
+// the strategy_authority PDA signer + caller_token_ata / delegate_token_ata
+// anti-theft snapshots, and uses the new deterministic AllowedAction PDA seeds.
+//
 // strategy.ts — Lending protocol integration via execute_strategy_action.
 //
 // This module implements the LuloProtocol interface by calling the vault's

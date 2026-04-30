@@ -141,43 +141,42 @@ describe("PDA derivation", () => {
   describe("deriveAllowedActionPda", () => {
     const vaultPda = deriveVaultPda(TEST_MINT, 0, PROGRAM_ID);
     const strategyPda = deriveStrategyPda(vaultPda, 0, PROGRAM_ID);
+    // Two synthetic target programs + two synthetic 8-byte discriminators.
+    const targetA = new PublicKey("HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2");
+    const targetB = new PublicKey("3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm");
+    const discA: number[] = [1, 2, 3, 4, 5, 6, 7, 8];
+    const discB: number[] = [8, 7, 6, 5, 4, 3, 2, 1];
 
-    // CRITICAL: AllowedAction uses u16 LE (2 bytes) for the action_id seed,
-    // NOT u64 LE (8 bytes) like vault/strategy IDs. This matches the on-chain
-    // Rust code where action_count is a u16. Using the wrong width would
-    // derive completely different (wrong) PDAs.
-    it("uses u16 LE for action ID (not u64)", () => {
+    // Seed scheme is ["allowed_action", strategy, target_program, discriminator].
+    // Cross-check against manual derivation; if the helper drifts from the
+    // on-chain Anchor #[derive(Accounts)] seeds in ExecuteAction, every
+    // execute_action call will fail with ConstraintSeeds.
+    it("matches manual derivation with the (strategy, target, disc) seeds", () => {
       const [expected] = PublicKey.findProgramAddressSync(
         [
           Buffer.from("allowed_action"),
           strategyPda.toBuffer(),
-          new BN(0).toArrayLike(Buffer, "le", 2), // u16, not u64!
+          targetA.toBuffer(),
+          Buffer.from(discA),
         ],
         PROGRAM_ID
       );
-      expect(deriveAllowedActionPda(strategyPda, 0, PROGRAM_ID).equals(expected)).toBe(true);
+      expect(deriveAllowedActionPda(strategyPda, targetA, discA, PROGRAM_ID).equals(expected)).toBe(true);
     });
 
-    // Same uniqueness check — different action IDs must produce different PDAs.
-    it("different action IDs produce different PDAs", () => {
-      const pda0 = deriveAllowedActionPda(strategyPda, 0, PROGRAM_ID);
-      const pda1 = deriveAllowedActionPda(strategyPda, 1, PROGRAM_ID);
-      expect(pda0.equals(pda1)).toBe(false);
+    // Different target_program / different discriminator must produce
+    // distinct PDAs — same strategy can hold many entries.
+    it("yields distinct PDAs across target programs and discriminators", () => {
+      const aA = deriveAllowedActionPda(strategyPda, targetA, discA, PROGRAM_ID);
+      const aB = deriveAllowedActionPda(strategyPda, targetA, discB, PROGRAM_ID);
+      const bA = deriveAllowedActionPda(strategyPda, targetB, discA, PROGRAM_ID);
+      const set = new Set([aA, aB, bA].map((k) => k.toBase58()));
+      expect(set.size).toBe(3);
     });
 
-    // Edge case: action ID 256 = 0x0100. In u16 LE this is [0x00, 0x01].
-    // If we accidentally used u8 (1 byte), 256 would overflow to 0x00 and
-    // collide with action ID 0. This test catches that specific bug.
-    it("action ID 256 works correctly with u16 encoding", () => {
-      const [expected] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("allowed_action"),
-          strategyPda.toBuffer(),
-          new BN(256).toArrayLike(Buffer, "le", 2),
-        ],
-        PROGRAM_ID
-      );
-      expect(deriveAllowedActionPda(strategyPda, 256, PROGRAM_ID).equals(expected)).toBe(true);
+    // Discriminators must be exactly 8 bytes. The helper rejects anything else.
+    it("rejects non-8-byte discriminators", () => {
+      expect(() => deriveAllowedActionPda(strategyPda, targetA, [1, 2, 3], PROGRAM_ID)).toThrow();
     });
   });
 });

@@ -1,8 +1,12 @@
 // types.ts — Shared TypeScript interfaces used across all agent modules.
 //
-// This file mirrors on-chain Anchor account structs as TypeScript interfaces,
-// and defines the agent-specific types for decisions, state tracking, and config.
-// No runtime logic — purely type definitions.
+// On-chain account mirrors match the Anchor structs in
+// programs/my_project/src/lib.rs. Pubkey fields become PublicKey; u64 fields
+// become BN (bn.js).
+//
+// Agent-specific decision/monitor/config types are kept here for now while
+// lulo still imports them; they'll move to agent/lulo/src/types.ts in step
+// 5c (PORT_PROGRESS.md).
 
 import { PublicKey } from "@solana/web3.js";
 import type { Keypair } from "@solana/web3.js";
@@ -10,132 +14,119 @@ import type BN from "bn.js";
 
 // =============================================================================
 // ON-CHAIN ACCOUNT MIRRORS
-// These interfaces match the Anchor account structs defined in state.rs.
-// They represent the deserialized data returned by program.account.*.fetch().
-// Pubkey fields become PublicKey, u64 fields become BN (bn.js).
 // =============================================================================
 
-// Mirrors the VaultState account — the main vault configuration PDA.
-// Seeds: ["vault", token_mint, vault_id]
+// Mirrors VaultState. Seeds: ["vault", token_mint, vault_id LE].
 export interface VaultStateAccount {
-  admin: PublicKey;         // governance role — creates/deactivates strategies
-  authority: PublicKey;     // operational role — allocates/deallocates funds
-  tokenMint: PublicKey;     // the accepted deposit token (e.g., USDC mint)
-  shareMint: PublicKey;     // vault's receipt token mint (minted on deposit)
-  vaultId: BN;              // allows multiple vaults per token mint
-  totalDeposited: BN;       // total assets across reserve + all strategies
-  strategyCount: BN;        // auto-incrementing counter for strategy IDs
-  bump: number;             // PDA bump seed
-  shareMintBump: number;    // share mint PDA bump seed
+  admin: PublicKey;
+  authority: PublicKey;
+  tokenMint: PublicKey;
+  shareMint: PublicKey;
+  vaultId: BN;
+  totalDeposited: BN;
+  strategyCount: BN;
+  bump: number;
+  shareMintBump: number;
+  vaultAuthorityBump: number;
+  paused: boolean;
+  performanceFeeBps: number;
+  totalActiveWeightBps: number;
+  pendingAdmin: PublicKey;
+  pendingAuthority: PublicKey;
 }
 
-// Mirrors the StrategyAllocation account — metadata for a single strategy.
-// Seeds: ["strategy", vault_state, strategy_id]
+// Mirrors StrategyAllocation. Seeds: ["strategy", vault_state, strategy_id LE].
+// The strategy ATA at ["strategy_token", vault_state, strategy_id LE] is owned
+// by strategy_authority[i], not by vault_state.
 export interface StrategyAccount {
-  vault: PublicKey;         // back-reference to the parent VaultState
-  strategyId: BN;           // unique sequential ID (0, 1, 2, ...)
-  delegate: PublicKey;      // the agent keypair authorized to request actions
-  allocatedAmount: BN;      // tokens currently allocated to this strategy
-  tokenAccount: PublicKey;  // PDA token account holding strategy's tokens
-  isActive: boolean;        // once false, permanently deactivated
-  targetWeightBps: number;  // rebalancing target (0-10000 basis points)
-  bump: number;             // PDA bump seed
-  actionCount: number;      // how many AllowedAction PDAs exist for this strategy
+  vault: PublicKey;
+  strategyId: BN;
+  delegate: PublicKey;
+  allocatedAmount: BN;
+  tokenAccount: PublicKey;
+  isActive: boolean;
+  targetWeightBps: number;
+  bump: number;
+  authorityBump: number;
 }
 
-// Mirrors the AllowedAction account — a whitelisted (program, instruction) pair.
-// Seeds: ["allowed_action", strategy, action_id]
-// The admin creates these to control which CPI calls the delegate can request.
+// Mirrors AllowedAction. Seeds:
+//   ["allowed_action", strategy, target_program, discriminator (8 bytes)].
+// expected_recipient_index pins one slot in remaining_accounts to
+// strategy.token_account; output_mint_index optionally pins another slot to
+// a mint that must be on the protocol allow-list (AllowedToken PDA).
 export interface AllowedActionAccount {
-  strategy: PublicKey;      // back-reference to the parent StrategyAllocation
-  targetProgram: PublicKey;  // the external program allowed to be CPI'd into
-  discriminator: number[];  // first 8 bytes of instruction data (Anchor discriminator)
-  actionId: number;         // sequential ID within the strategy
-  isActive: boolean;        // can be deactivated by admin without closing
-  bump: number;             // PDA bump seed
+  vault: PublicKey;
+  strategy: PublicKey;
+  strategyId: BN;
+  targetProgram: PublicKey;
+  discriminator: number[];
+  expectedRecipientIndex: number;
+  outputMintIndex: number | null;
+  bump: number;
 }
 
 // =============================================================================
-// AGENT DECISION TYPES
-// These types represent the output of the LLM advisor.
-// The monitor loop acts on these decisions.
+// AGENT DECISION TYPES (lulo-specific; kept here until step 5c)
 // =============================================================================
 
-// The LLM returns one of three possible decisions:
-// - LEND: deposit `amount` micro-USDC into Lulo to earn yield
-// - WITHDRAW: pull `amount` micro-USDC out of Lulo back to strategy token account
-// - HOLD: do nothing this cycle
-// All amounts are in micro-USDC (6 decimals, e.g., 1_000_000 = 1 USDC).
 export type AgentDecision =
   | { action: "LEND"; amount: number; reason?: string }
   | { action: "WITHDRAW"; amount: number; reason?: string }
   | { action: "HOLD"; reason: string };
 
-// A point-in-time snapshot of the strategy's on-chain state.
-// Captured each poll cycle and compared to the previous snapshot
-// to detect balance changes that trigger LLM consultation.
 export interface StrategySnapshot {
-  allocatedAmount: number;  // from StrategyAllocation.allocated_amount
-  tokenBalance: number;     // actual SPL token balance of strategy token account
-  isActive: boolean;        // from StrategyAllocation.is_active
-  timestamp: number;        // Date.now() when snapshot was taken
+  allocatedAmount: number;
+  tokenBalance: number;
+  isActive: boolean;
+  timestamp: number;
 }
 
-// Mutable state tracked across polling cycles within the monitor loop.
-// Persists in memory (not on-chain) — resets when agent restarts.
 export interface MonitorState {
-  lastBalance: number;          // previous cycle's token balance (-1 = first run)
-  lastDecisionTime: number;     // timestamp of last LLM decision
-  consecutiveErrors: number;    // error counter for backoff logic
-  routineCycleCount: number;    // counts cycles with no state change (for periodic re-eval)
-  lastSnapshot: StrategySnapshot | null;  // previous cycle's snapshot
+  lastBalance: number;
+  lastDecisionTime: number;
+  consecutiveErrors: number;
+  routineCycleCount: number;
+  lastSnapshot: StrategySnapshot | null;
 }
 
-// Shape of the withdraw-signal.json file. The vault authority (or admin) creates
-// this file to tell the agent to withdraw a specific amount from the lending protocol.
-// The agent reads it, executes the withdrawal, and deletes the file.
 export interface WithdrawSignal {
-  amount: number;           // micro-USDC to withdraw from Lulo
-  requestedAt: string;      // ISO timestamp of when the signal was created
-  requestedBy: string;      // who created it (e.g., "admin", "authority")
+  amount: number;
+  requestedAt: string;
+  requestedBy: string;
 }
 
 // =============================================================================
-// CONFIG
+// CONFIG (lulo-specific; kept here until step 5c)
 // =============================================================================
 
-// Typed, validated version of all .env variables. Created once at startup
-// by loadConfig() and passed to all modules. Object.freeze'd to prevent mutation.
 export interface AgentConfig {
-  agentKeypair: Keypair;       // the delegate keypair (signs execute_strategy_action txs)
-  rpcUrl: string;              // Solana RPC endpoint
-  anthropicApiKey: string;     // Claude API key for LLM decisions
-  vaultTokenMint: PublicKey;   // the vault's underlying token mint (e.g., USDC)
-  vaultId: number;             // which vault (multiple vaults can exist per mint)
-  strategyId: number;          // which strategy this agent manages
-  pollIntervalMs: number;      // how often to check on-chain state (default: 30s)
-  minLendAmount: number;       // minimum micro-USDC to trigger a lending action
-  luloProgramId: PublicKey;    // target protocol program ID (mock_lulo on devnet, Lulo on mainnet)
-  luloTreasury: PublicKey;     // protocol's treasury token account PDA
-  withdrawSignalPath: string;  // path to the withdrawal signal JSON file
-  maxRetries: number;          // max retry attempts for transient errors
-  retryDelayMs: number;        // base delay between retries (multiplied by attempt number)
+  agentKeypair: Keypair;
+  rpcUrl: string;
+  anthropicApiKey: string;
+  vaultTokenMint: PublicKey;
+  vaultId: number;
+  strategyId: number;
+  pollIntervalMs: number;
+  minLendAmount: number;
+  luloProgramId: PublicKey;
+  luloTreasury: PublicKey;
+  withdrawSignalPath: string;
+  maxRetries: number;
+  retryDelayMs: number;
 }
 
 // =============================================================================
-// PROTOCOL INTERFACE
+// PROTOCOL INTERFACE (lulo-specific; kept here until step 5c)
 // =============================================================================
 
-// Abstraction over the lending protocol (Lulo). Two implementations:
-// - MockLuloProtocol: tracks lent amount in memory, no on-chain interaction (devnet)
-// - RealLuloProtocol: builds CPI instructions and calls execute_strategy_action (mainnet)
 export interface YieldInfo {
-  rate: number;         // observed surplus / principal (0 if no surplus yet)
-  hasAccrued: boolean;  // true if actual yield detected in treasury, false if just deposited
+  rate: number;
+  hasAccrued: boolean;
 }
 
 export interface LuloProtocol {
-  getCurrentYield(): Promise<YieldInfo>;      // observed yield + whether it has accrued
-  getLentBalance(): Promise<number>;          // micro-USDC currently lent to protocol
-  execute(decision: AgentDecision): Promise<string>;  // execute action, return tx sig
+  getCurrentYield(): Promise<YieldInfo>;
+  getLentBalance(): Promise<number>;
+  execute(decision: AgentDecision): Promise<string>;
 }
