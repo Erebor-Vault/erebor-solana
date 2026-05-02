@@ -16,11 +16,20 @@
  */
 
 import * as anchor from "@coral-xyz/anchor";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  Transaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import { createMint } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
 import { MVP_TOKEN_LIST, MvpMintsFile } from "./mvp-token-list";
+import {
+  createMetadataAccountV3Instruction,
+  deriveMetadataPda,
+} from "./metaplex-metadata";
 
 function parseArgs() {
   const a = process.argv.slice(2);
@@ -80,25 +89,66 @@ async function main() {
 
   let added = 0;
   for (const t of MVP_TOKEN_LIST) {
-    if (existing[t.symbol]) {
+    if (!existing[t.symbol]) {
+      const mint = await createMint(
+        connection,
+        payer,
+        payer.publicKey, // mint authority
+        payer.publicKey, // freeze authority
+        t.decimals
+      );
+      existing[t.symbol] = mint.toBase58();
+      added += 1;
+      console.log(`  ✓ ${t.symbol.padEnd(8)} ${mint.toBase58()} (decimals=${t.decimals})`);
+      fs.writeFileSync(file, JSON.stringify(existing, null, 2));
+    } else {
       console.log(`  · ${t.symbol.padEnd(8)} already minted: ${existing[t.symbol]}`);
-      continue;
     }
-    const mint = await createMint(
-      connection,
-      payer,
-      payer.publicKey, // mint authority
-      payer.publicKey, // freeze authority
-      t.decimals
-    );
-    existing[t.symbol] = mint.toBase58();
-    added += 1;
-    console.log(`  ✓ ${t.symbol.padEnd(8)} ${mint.toBase58()} (decimals=${t.decimals})`);
-    // Persist incrementally so a partial run isn't lost.
-    fs.writeFileSync(file, JSON.stringify(existing, null, 2));
   }
 
-  console.log(`\nDone. ${added} new mint${added === 1 ? "" : "s"}, ${MVP_TOKEN_LIST.length} total.`);
+  console.log(`\n${added} new mint${added === 1 ? "" : "s"}, ${MVP_TOKEN_LIST.length} total.`);
+
+  // Pass 2: create Metaplex Token Metadata for any mint missing it. The
+  // frontend reads these to resolve mint → symbol on-chain (no env-var
+  // dependency). Idempotent: each metadata PDA's existence is checked
+  // before submitting the create ix.
+  console.log(`\n=== Metaplex metadata pass ===`);
+  let metadataWritten = 0;
+  for (const t of MVP_TOKEN_LIST) {
+    const mintStr = existing[t.symbol];
+    if (!mintStr) continue;
+    const mint = new PublicKey(mintStr);
+    const metadataPda = deriveMetadataPda(mint);
+    const existingMetadata = await connection.getAccountInfo(metadataPda);
+    if (existingMetadata) {
+      console.log(`  · ${t.symbol.padEnd(8)} metadata exists`);
+      continue;
+    }
+    const ix = createMetadataAccountV3Instruction({
+      metadata: metadataPda,
+      mint,
+      mintAuthority: payer.publicKey,
+      payer: payer.publicKey,
+      updateAuthority: payer.publicKey,
+      name: `${t.symbol} (devnet mock)`,
+      symbol: t.symbol,
+      uri: "",
+    });
+    const tx = new Transaction().add(ix);
+    try {
+      const sig = await sendAndConfirmTransaction(connection, tx, [payer], {
+        commitment: "confirmed",
+      });
+      metadataWritten += 1;
+      console.log(`  ✓ ${t.symbol.padEnd(8)} metadata — ${sig.slice(0, 12)}…`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  ! ${t.symbol.padEnd(8)} metadata failed: ${msg.slice(0, 120)}`);
+    }
+  }
+  console.log(
+    `${metadataWritten} new metadata account${metadataWritten === 1 ? "" : "s"} written.`
+  );
 
   // Emit a paste-ready env line so the frontend can resolve mint → symbol.
   // The frontend reads `NEXT_PUBLIC_TOKEN_SYMBOLS` (a JSON map) at runtime

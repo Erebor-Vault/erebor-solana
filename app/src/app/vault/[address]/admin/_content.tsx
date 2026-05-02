@@ -159,27 +159,26 @@ function AdminContent() {
 
       <PausedBanner />
 
-      <Zone eyebrow="Operations">
+      <Zone eyebrow="General">
         <div className="grid gap-4 lg:grid-cols-2">
-          <PauseToggle />
+          <AllocationChart />
           <PerformanceFeeEditor />
         </div>
-        <AdminTransferFlow />
+        <VaultAllowedTokensPanel />
       </Zone>
 
-      <Zone eyebrow="Allocation">
-        <VaultAllowedTokensPanel />
-        <div className="grid gap-8 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <StrategyList />
-          </div>
-          <div>
-            <AllocationChart />
-          </div>
+      <Zone eyebrow="Strategies">
+        <StrategyList />
+      </Zone>
+
+      <Zone eyebrow="Controls">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <PauseToggle />
+          <AdminTransferFlow />
         </div>
       </Zone>
 
-      <Zone eyebrow="Audit">
+      <Zone eyebrow="Activity">
         <ActivityFeed />
       </Zone>
     </div>

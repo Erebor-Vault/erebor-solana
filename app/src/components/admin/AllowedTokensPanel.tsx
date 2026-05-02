@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useAllowedTokens } from "@/hooks/useAllowedTokens";
+import { useTokenMetadata } from "@/hooks/useTokenMetadata";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { truncateAddress } from "@/lib/format";
@@ -14,6 +15,10 @@ import { lookupTokenSymbol } from "@/lib/knownTokens";
  *  ProtocolConfig.governance — non-governance wallets see a read-only list. */
 export function AllowedTokensPanel() {
   const { rows, loading, isGovernance, addAllowed, removeAllowed } = useAllowedTokens();
+  const mints = useMemo(() => rows.map((r) => r.mint), [rows]);
+  const metadataSymbols = useTokenMetadata(mints);
+  const resolveSymbol = (mint: string): string | null =>
+    metadataSymbols[mint] ?? lookupTokenSymbol(mint);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -109,7 +114,7 @@ export function AllowedTokensPanel() {
           <ul className="mt-2 divide-y divide-[var(--color-border)]">
             {rows.map((r) => {
               const mintStr = r.mint.toBase58();
-              const symbol = lookupTokenSymbol(mintStr);
+              const symbol = resolveSymbol(mintStr);
               return (
                 <li
                   key={mintStr}

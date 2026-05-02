@@ -163,11 +163,10 @@ export function ActivityFeed() {
 
   return (
     <section className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-5">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-base font-semibold">Activity</h3>
-        <span className="text-xs text-[var(--color-text-muted)]">
-          live program logs
-        </span>
+      <div className="mb-3">
+        <h3 className="font-display text-base font-semibold tracking-tight">
+          Live program logs
+        </h3>
       </div>
       {bootstrapping && rows.length === 0 ? (
         <p className="text-sm text-[var(--color-text-secondary)]">Loading…</p>
