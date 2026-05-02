@@ -106,3 +106,40 @@ export function deriveUserAta(
 ): PublicKey {
   return getAssociatedTokenAddressSync(mint, owner);
 }
+
+/** Per-vault curator-controlled token allow-list entry. Defense-in-depth
+ *  alongside the protocol-level `AllowedToken` PDA. */
+export function deriveVaultAllowedTokenPda(
+  vaultState: PublicKey,
+  mint: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault_allowed_token"), vaultState.toBuffer(), mint.toBuffer()],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+/** Phase-5: per-(strategy, kind) auto-action config. `kind` is 0=Deposit, 1=Withdraw. */
+export function deriveAutoActionConfigPda(
+  strategy: PublicKey,
+  kind: number
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("auto_action"), strategy.toBuffer(), Buffer.from([kind])],
+    PROGRAM_ID
+  );
+  return pda;
+}
+
+/** Phase-5: per-(strategy, slot index) value-source registry entry. */
+export function deriveValueSourcePda(
+  strategy: PublicKey,
+  index: number
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("value_source"), strategy.toBuffer(), Buffer.from([index])],
+    PROGRAM_ID
+  );
+  return pda;
+}

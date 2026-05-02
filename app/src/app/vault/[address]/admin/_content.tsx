@@ -10,6 +10,7 @@ import { PauseToggle } from "@/components/admin/PauseToggle";
 import { PerformanceFeeEditor } from "@/components/admin/PerformanceFeeEditor";
 import { AdminTransferFlow } from "@/components/admin/AdminTransferFlow";
 import { AllowedTokensPanel } from "@/components/admin/AllowedTokensPanel";
+import { VaultAllowedTokensPanel } from "@/components/admin/VaultAllowedTokensPanel";
 import { PausedBanner } from "@/components/vault/PausedBanner";
 import { ActivityFeed } from "@/components/vault/ActivityFeed";
 import { CopyButton } from "@/components/shared/CopyButton";
@@ -141,6 +142,8 @@ function AdminContent() {
       <AdminTransferFlow />
 
       <AllowedTokensPanel />
+
+      <VaultAllowedTokensPanel />
 
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">

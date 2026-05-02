@@ -59,7 +59,7 @@ export function AllocationChart() {
   const rows: Slice[] = [];
   if (!reserveBalance.isZero()) {
     rows.push({
-      name: "Reserve",
+      name: "Idle Reserve",
       value: reserveBalance.toNumber(),
       raw: reserveBalance,
       color: RESERVE_COLOR,

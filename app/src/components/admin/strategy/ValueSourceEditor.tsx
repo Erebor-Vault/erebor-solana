@@ -1,104 +1,368 @@
 "use client";
 
+import { useState } from "react";
+import { PublicKey } from "@solana/web3.js";
+import BN from "bn.js";
 import type { StrategyData } from "@/hooks/useStrategies";
+import {
+  useValueSources,
+  VALUE_SOURCE_KIND_SPL_ATA_BALANCE,
+  VALUE_SOURCE_KIND_ACCOUNT_U64,
+  MAX_VALUE_SOURCES_PER_STRATEGY,
+} from "@/hooks/useValueSources";
+import { useRoles } from "@/hooks/useRoles";
+import { CopyButton } from "@/components/shared/CopyButton";
+import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
+import { truncateAddress } from "@/lib/format";
+
+interface Props {
+  strategy: StrategyData;
+  disabled?: boolean;
+}
+
+const KIND_LABEL: Record<number, string> = {
+  [VALUE_SOURCE_KIND_SPL_ATA_BALANCE]: "SPL ATA balance",
+  [VALUE_SOURCE_KIND_ACCOUNT_U64]: "Account u64",
+};
 
 /**
- * Value-source editor — placeholder shape only.
- *
- * Why disabled: the program does not yet expose `add_value_source` /
- * `remove_value_source` or a `ValueSource` PDA. Once shipped (docs/SOLANA_VAULT_SPEC.md §8),
- * each strategy will register N value sources that contribute to its NAV
- * calculation:
- *   - `SplAtaBalance` — read a token-account balance
- *   - `CpiCall` — invoke a read-only protocol entrypoint
- *   - `Constant` — pin a value
- *
- * `compute_total_assets` would aggregate them so off-chain code (and a
- * future `report_yield`-replacement) can resolve NAV without trusting the
- * agent. See docs/MISMATCHES.md §2.1.
+ * Per-strategy value-source registry. Each registered slot contributes
+ * to the strategy's live NAV; `Settle now` (authority-only) reads the
+ * registry, sums into a `computed_value`, and books the signed delta
+ * into both `strategy.allocated_amount` and `vault.total_deposited`.
  */
-const KIND_OPTIONS = [
-  { value: "SplAtaBalance", label: "SPL ATA balance (read a token account)" },
-  { value: "CpiCall", label: "Read-only CPI (call a protocol view)" },
-  { value: "Constant", label: "Constant value" },
-];
+export function ValueSourceEditor({ strategy, disabled }: Props) {
+  const { rows, loading, submitting, nextFreeIndex, addSource, removeSource, settle } =
+    useValueSources(strategy.publicKey, strategy.strategyId);
+  const { isAuthority } = useRoles();
 
-export function ValueSourceEditor({ strategy }: { strategy: StrategyData }) {
+  const [kind, setKind] = useState<number>(VALUE_SOURCE_KIND_SPL_ATA_BALANCE);
+  const [target, setTarget] = useState("");
+  const [offsetStr, setOffsetStr] = useState("0");
+  const [scaleNumStr, setScaleNumStr] = useState("1");
+  const [scaleDenStr, setScaleDenStr] = useState("1");
+  const [busy, setBusy] = useState(false);
+
+  const free = nextFreeIndex();
+
+  // Parse + validate.
+  let targetParsed: PublicKey | null = null;
+  let targetError: string | null = null;
+  if (target.trim()) {
+    try {
+      targetParsed = new PublicKey(target.trim());
+    } catch {
+      targetError = "Not a valid base58 pubkey";
+    }
+  } else {
+    targetError = "Required";
+  }
+
+  const offsetParsed = parseUintOrNull(offsetStr);
+  const offsetError =
+    kind === VALUE_SOURCE_KIND_ACCOUNT_U64 && offsetParsed === null
+      ? "Required (non-negative integer)"
+      : null;
+
+  const scaleNumParsed = parseBnOrNull(scaleNumStr);
+  const scaleNumError = scaleNumParsed === null ? "Need a non-negative integer" : null;
+  const scaleDenParsed = parseBnOrNull(scaleDenStr);
+  const scaleDenError =
+    scaleDenParsed === null
+      ? "Need a non-negative integer"
+      : scaleDenParsed.isZero()
+      ? "Must be non-zero"
+      : null;
+
+  const canAdd =
+    !disabled &&
+    !busy &&
+    !submitting &&
+    free !== null &&
+    targetParsed !== null &&
+    scaleNumParsed !== null &&
+    scaleDenParsed !== null &&
+    !scaleDenParsed.isZero() &&
+    (kind === VALUE_SOURCE_KIND_SPL_ATA_BALANCE || offsetParsed !== null);
+
+  const handleAdd = async () => {
+    if (free === null || !targetParsed || !scaleNumParsed || !scaleDenParsed) return;
+    setBusy(true);
+    try {
+      const sig = await addSource({
+        index: free,
+        kind,
+        targetAccount: targetParsed,
+        offset: kind === VALUE_SOURCE_KIND_ACCOUNT_U64 ? offsetParsed ?? 0 : 0,
+        scaleNum: scaleNumParsed,
+        scaleDen: scaleDenParsed,
+      });
+      showTxSuccess(sig);
+      setTarget("");
+      setOffsetStr("0");
+      setScaleNumStr("1");
+      setScaleDenStr("1");
+    } catch (err) {
+      showTxError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async (index: number) => {
+    setBusy(true);
+    try {
+      const sig = await removeSource(index);
+      showTxSuccess(sig);
+    } catch (err) {
+      showTxError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSettle = async () => {
+    setBusy(true);
+    try {
+      const sig = await settle(strategy.tokenAccount);
+      showTxSuccess(sig);
+    } catch (err) {
+      showTxError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-secondary)] p-6">
-      <header className="mb-3">
-        <h3 className="text-base font-semibold">
-          Value sources — strategy {strategy.strategyId.toString()}
-        </h3>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Inputs to the strategy&apos;s NAV. The aggregate becomes the basis
-          for share-price computation under the spec&apos;s value-source model.
-        </p>
+      <header className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-base font-semibold">
+            Value sources — strategy {strategy.strategyId.toString()}
+          </h3>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Up to {MAX_VALUE_SOURCES_PER_STRATEGY} sources per strategy.{" "}
+            <code>Settle now</code> reads them, sums into a live{" "}
+            <code>computed_value</code>, and books the delta into{" "}
+            <code>allocated_amount</code> + <code>total_deposited</code>.
+          </p>
+        </div>
+        {loading && <span className="text-xs text-[var(--color-text-muted)]">loading…</span>}
       </header>
 
-      <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-3 text-xs text-[var(--color-warning)]">
-        <p className="font-semibold">Not shipped yet — Phase 2 program work</p>
-        <p className="mt-1 text-[var(--color-warning)]/80">
-          Blocked on <code>ValueSource</code> PDAs +{" "}
-          <code>add_value_source</code> / <code>remove_value_source</code>.
-          Today share price comes from <code>report_yield</code>{" "}
-          (admin-pushed), not from on-chain NAV. See docs/MISMATCHES.md §2.1 and
-          <code> docs/SOLANA_VAULT_SPEC.md</code> §8.
+      {/* Existing slots */}
+      <div className="mb-4">
+        <p className="mb-2 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+          Registered ({rows.length}/{MAX_VALUE_SOURCES_PER_STRATEGY})
         </p>
-      </div>
-
-      <div className="mt-4 grid gap-3 opacity-60">
-        <Field label="Kind">
-          <select
-            disabled
-            className="h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm"
-          >
-            {KIND_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
+        {rows.length === 0 ? (
+          <div className="rounded-md border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
+            No value sources yet. Add one below to start tracking live NAV.
+          </div>
+        ) : (
+          <ul className="grid gap-2">
+            {rows.map((r) => (
+              <li
+                key={r.index}
+                className="flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+              >
+                <div className="grid gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+                      [{r.index}]
+                    </span>
+                    <span className="font-semibold">
+                      {KIND_LABEL[r.kind] ?? `kind=${r.kind}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                    <code className="font-mono">
+                      {truncateAddress(r.targetAccount.toBase58(), 6)}
+                    </code>
+                    <CopyButton value={r.targetAccount.toBase58()} />
+                    {r.kind === VALUE_SOURCE_KIND_ACCOUNT_U64 && (
+                      <span>· offset {r.offset}</span>
+                    )}
+                    {(!r.scaleNum.eq(new BN(1)) || !r.scaleDen.eq(new BN(1))) && (
+                      <span>
+                        · scale {r.scaleNum.toString()}/{r.scaleDen.toString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={disabled || busy || submitting}
+                  onClick={() => handleRemove(r.index)}
+                  className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-surface-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </li>
             ))}
-          </select>
-        </Field>
-        <Field label="Account / target">
-          <input
-            type="text"
-            disabled
-            placeholder="Base58 pubkey…"
-            className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm"
-          />
-        </Field>
-        <button
-          type="button"
-          disabled
-          className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Add value source (coming with §8)
-        </button>
+          </ul>
+        )}
       </div>
 
-      <div className="mt-6">
-        <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-          Registered value sources
-        </p>
-        <div className="mt-2 rounded-md border border-dashed border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">
-          Today, NAV is approximated by{" "}
-          <code>strategy_token_account.amount</code> alone (manual{" "}
-          <code>report_yield</code>). When value sources land,{" "}
-          <code>program.account.valueSource.all()</code> will list them here.
+      {/* Add form */}
+      {free !== null ? (
+        <fieldset className="mb-4 rounded-md border border-[var(--color-border)] p-4">
+          <legend className="px-1 text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+            Add source (slot {free})
+          </legend>
+          <div className="grid gap-3">
+            <Field label="Kind">
+              <select
+                value={kind}
+                onChange={(e) => setKind(Number(e.target.value))}
+                disabled={disabled || busy}
+                className="h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm"
+              >
+                <option value={VALUE_SOURCE_KIND_SPL_ATA_BALANCE}>
+                  SPL ATA balance — read SPL token account `amount`
+                </option>
+                <option value={VALUE_SOURCE_KIND_ACCOUNT_U64}>
+                  Account u64 — read u64 at offset
+                </option>
+              </select>
+            </Field>
+
+            <Field label="Target account" error={targetError}>
+              <input
+                type="text"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                disabled={disabled || busy}
+                placeholder="Base58 pubkey"
+                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm"
+              />
+            </Field>
+
+            {kind === VALUE_SOURCE_KIND_ACCOUNT_U64 && (
+              <Field label="Byte offset" error={offsetError}>
+                <input
+                  type="text"
+                  value={offsetStr}
+                  onChange={(e) => setOffsetStr(e.target.value)}
+                  disabled={disabled || busy}
+                  placeholder="0"
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm"
+                />
+              </Field>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field
+                label="Scale numerator"
+                error={scaleNumError}
+                hint="Default 1"
+              >
+                <input
+                  type="text"
+                  value={scaleNumStr}
+                  onChange={(e) => setScaleNumStr(e.target.value)}
+                  disabled={disabled || busy}
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm"
+                />
+              </Field>
+              <Field
+                label="Scale denominator"
+                error={scaleDenError}
+                hint="Default 1"
+              >
+                <input
+                  type="text"
+                  value={scaleDenStr}
+                  onChange={(e) => setScaleDenStr(e.target.value)}
+                  disabled={disabled || busy}
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm"
+                />
+              </Field>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                disabled={!canAdd}
+                onClick={handleAdd}
+                className="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? "adding…" : `Add to slot ${free}`}
+              </button>
+            </div>
+          </div>
+        </fieldset>
+      ) : (
+        <div className="mb-4 rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-3 text-xs text-[var(--color-warning)]">
+          All {MAX_VALUE_SOURCES_PER_STRATEGY} slots are occupied. Remove one
+          to free a slot before adding a new source.
+        </div>
+      )}
+
+      {/* Settle button — authority-only */}
+      <div className="rounded-md border border-[var(--color-border)] p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold">Settle strategy value</p>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {isAuthority
+                ? "Authority-only. Reads the registry above and books the signed delta."
+                : "Authority-only — connect the authority wallet to enable."}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={disabled || busy || submitting || !isAuthority || rows.length === 0}
+            onClick={handleSettle}
+            className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm font-semibold hover:bg-[var(--color-surface-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "settling…" : "Settle now"}
+          </button>
         </div>
       </div>
     </section>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  error,
+  hint,
+  children,
+}: {
+  label: string;
+  error?: string | null;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="grid gap-1">
       <span className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
         {label}
       </span>
       {children}
+      {error && <span className="text-xs text-[var(--color-danger)]">{error}</span>}
+      {!error && hint && (
+        <span className="text-xs text-[var(--color-text-muted)]">{hint}</span>
+      )}
     </div>
   );
+}
+
+function parseUintOrNull(s: string): number | null {
+  const t = s.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 0 && n <= 0xffffffff ? n : null;
+}
+
+function parseBnOrNull(s: string): BN | null {
+  const t = s.trim();
+  if (t === "") return null;
+  if (!/^\d+$/.test(t)) return null;
+  try {
+    return new BN(t);
+  } catch {
+    return null;
+  }
 }
