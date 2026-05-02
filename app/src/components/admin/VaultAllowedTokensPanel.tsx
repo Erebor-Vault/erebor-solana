@@ -8,9 +8,12 @@ import { truncateAddress } from "@/lib/format";
 import { lookupTokenSymbol } from "@/lib/knownTokens";
 
 /**
- * Per-vault token allow-list — slim, always-interactive chip row. Every
- * protocol-level mint renders as a chip; clicking toggles enabled state.
- * Apply / Reset surface only when the working set diverges from on-chain.
+ * Per-vault token allow-list — slim, always-interactive checkbox row.
+ * Each protocol-level mint renders as `[☑ SYMBOL]` inline; the row
+ * wraps as needed. Click anywhere on the label OR the box to toggle.
+ *
+ * Symbol resolution: Metaplex metadata → env map → built-in mainnet →
+ * truncated mint fallback (in mono).
  *
  * Curator-controlled (Option B defense-in-depth alongside the global
  * protocol allow-list).
@@ -25,10 +28,10 @@ export function VaultAllowedTokensPanel() {
     counts,
   } = useVaultAllowedTokens();
 
-  // Resolve symbols on-chain via Metaplex Token Metadata. Cached per
-  // session; falls back to the static built-in / env map when a mint
-  // has no metadata account.
-  const candidateMints = useMemo(() => candidates.map((c) => c.mint), [candidates]);
+  const candidateMints = useMemo(
+    () => candidates.map((c) => c.mint),
+    [candidates]
+  );
   const metadataSymbols = useTokenMetadata(candidateMints);
   const resolveSymbol = (mint: string): string | null =>
     metadataSymbols[mint] ?? lookupTokenSymbol(mint);
@@ -78,10 +81,10 @@ export function VaultAllowedTokensPanel() {
           : "border-[var(--color-border)]"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
         <span className="eyebrow shrink-0">Allowed output tokens</span>
 
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5">
           {loading ? (
             <span className="text-xs text-[var(--color-text-muted)]">
               loading…
@@ -98,21 +101,15 @@ export function VaultAllowedTokensPanel() {
               const willAdd = !c.enabled && isOn;
               const willRemove = c.enabled && !isOn;
               return (
-                <TokenChip
+                <CheckItem
                   key={mintStr}
                   mint={mintStr}
                   symbol={symbol}
-                  state={
-                    willAdd
-                      ? "will-add"
-                      : willRemove
-                      ? "will-remove"
-                      : isOn
-                      ? "on"
-                      : "off"
-                  }
+                  checked={isOn}
+                  willAdd={willAdd}
+                  willRemove={willRemove}
                   disabled={!isAdmin || submitting}
-                  onClick={() => toggle(mintStr)}
+                  onChange={() => toggle(mintStr)}
                 />
               );
             })
@@ -157,47 +154,56 @@ export function VaultAllowedTokensPanel() {
   );
 }
 
-type ChipState = "on" | "off" | "will-add" | "will-remove";
-
-function TokenChip({
+function CheckItem({
   mint,
   symbol,
-  state,
+  checked,
+  willAdd,
+  willRemove,
   disabled,
-  onClick,
+  onChange,
 }: {
   mint: string;
   symbol: string | null;
-  state: ChipState;
+  checked: boolean;
+  willAdd: boolean;
+  willRemove: boolean;
   disabled: boolean;
-  onClick: () => void;
+  onChange: () => void;
 }) {
-  const styles: Record<ChipState, string> = {
-    on:
-      "border-[var(--color-accent)]/50 bg-[var(--color-accent)]/15 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/25",
-    off:
-      "border-[var(--color-border)] bg-transparent text-[var(--color-text-muted)] hover:border-[var(--color-accent)]/40 hover:text-[var(--color-text-primary)]",
-    "will-add":
-      "border-[var(--color-accent)] bg-[var(--color-accent)]/20 text-[var(--color-accent)] shadow-[0_0_8px_rgba(94,234,212,0.25)]",
-    "will-remove":
-      "border-[var(--color-warning)]/60 bg-[var(--color-warning)]/10 text-[var(--color-warning)] line-through decoration-[var(--color-warning)]/60",
-  };
-  const label = symbol ?? truncateAddress(mint, 3);
+  // Color and decoration follow state:
+  // - on (settled): cyan symbol
+  // - off (settled): muted symbol
+  // - will-add (off → on): cyan with subtle glow
+  // - will-remove (on → off): warning + line-through
+  const labelClass = willRemove
+    ? "text-[var(--color-warning)] line-through decoration-[var(--color-warning)]/60"
+    : willAdd
+      ? "text-[var(--color-accent)] [text-shadow:0_0_8px_rgba(94,234,212,0.35)]"
+      : checked
+        ? "text-[var(--color-accent)]"
+        : "text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={`${symbol ? symbol + " · " : ""}${mint}\n${state.replace("-", " ")}`}
-      aria-pressed={state === "on" || state === "will-add"}
-      className={`group inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium tabular-nums transition-all disabled:cursor-not-allowed disabled:opacity-50 ${styles[state]}`}
+    <label
+      title={`${symbol ? symbol + " · " : ""}${mint}`}
+      className={`group inline-flex cursor-pointer items-center gap-1.5 select-none transition-colors ${
+        disabled ? "cursor-not-allowed opacity-60" : ""
+      }`}
     >
-      {!symbol && (
-        <span className="opacity-60" aria-hidden>
-          ·
-        </span>
-      )}
-      {label}
-    </button>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-accent)] disabled:cursor-not-allowed"
+        aria-label={`Allow ${symbol ?? mint}`}
+      />
+      <span className={`text-xs font-medium tabular-nums ${labelClass}`}>
+        {symbol ?? (
+          <span className="font-mono text-[10px]">{truncateAddress(mint, 4)}</span>
+        )}
+      </span>
+    </label>
   );
 }
