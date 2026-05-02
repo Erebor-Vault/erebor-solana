@@ -8,14 +8,14 @@ import { truncateAddress } from "@/lib/format";
 import { lookupTokenSymbol } from "@/lib/knownTokens";
 
 /**
- * Per-vault token allow-list editor — admin-controlled (Option B
- * defense-in-depth alongside the global protocol allow-list).
+ * Per-vault token allow-list — slim form. Renders as one inline strip
+ * with the currently-enabled symbols as chips and an `Edit` toggle that
+ * expands a compact multi-select grid below. Curator-controlled (Option
+ * B defense-in-depth alongside the global protocol allow-list).
  *
- * UI: a collapsible <details> dropdown with a multi-select checkbox list
- * over the protocol-level mints. Already-enabled mints render checked.
- * Admin toggles checkboxes and clicks "Apply" to converge the on-chain
- * state to the selection in a single transaction (chunked at 8 ixs/tx
- * if needed).
+ * Designed to live above the Strategies grid: must take minimal vertical
+ * space when collapsed (~40px) and read like a status row, not a
+ * dedicated panel.
  */
 export function VaultAllowedTokensPanel() {
   const {
@@ -27,9 +27,8 @@ export function VaultAllowedTokensPanel() {
     counts,
   } = useVaultAllowedTokens();
 
-  // Local working set of mint base58 strings — initialised from the
-  // server-side `enabled` flags and edited freely until the user hits
-  // Apply or Reset.
+  const [open, setOpen] = useState(false);
+
   const initialSelected = useMemo(
     () =>
       new Set(
@@ -39,25 +38,20 @@ export function VaultAllowedTokensPanel() {
   );
   const [selected, setSelected] = useState<Set<string>>(initialSelected);
 
-  // Re-sync the working set when the server data changes.
   useEffect(() => {
     setSelected(initialSelected);
   }, [initialSelected]);
 
-  const toggle = (mint: string) => {
+  const toggle = (mint: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(mint)) next.delete(mint);
-      else next.add(mint);
+      next.has(mint) ? next.delete(mint) : next.add(mint);
       return next;
     });
-  };
 
-  // Diff against the original `enabled` flags.
-  const initial = initialSelected;
-  const toAddCount = [...selected].filter((m) => !initial.has(m)).length;
-  const toRemoveCount = [...initial].filter((m) => !selected.has(m)).length;
-  const dirty = toAddCount > 0 || toRemoveCount > 0;
+  const toAdd = [...selected].filter((m) => !initialSelected.has(m)).length;
+  const toRemove = [...initialSelected].filter((m) => !selected.has(m)).length;
+  const dirty = toAdd > 0 || toRemove > 0;
 
   const handleApply = async () => {
     try {
@@ -70,183 +64,194 @@ export function VaultAllowedTokensPanel() {
       showTxError(err);
     }
   };
-
   const handleReset = () => setSelected(initialSelected);
 
-  const summary = loading
-    ? "loading…"
-    : counts.protocol === 0
-    ? "no protocol-level mints"
-    : `${counts.enabled} of ${counts.protocol} enabled`;
+  // Sort enabled chips so the displayed order is stable across renders.
+  const enabled = candidates.filter((c) => c.enabled);
+  const VISIBLE = 5;
+  const visibleChips = enabled.slice(0, VISIBLE);
+  const overflow = Math.max(0, enabled.length - VISIBLE);
 
   return (
-    <section
-      className={`relative rounded-xl border bg-[var(--color-surface-secondary)] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),inset_0_0_0_1px_rgba(212,162,74,0.08)] transition-colors ${
+    <div
+      className={`relative rounded-lg border bg-[var(--color-surface-secondary)]/60 transition-colors ${
         dirty
-          ? "border-[var(--color-border)] border-l-4 border-l-[var(--color-accent)]"
+          ? "border-[var(--color-border)] border-l-[3px] border-l-[var(--color-accent)]"
           : "border-[var(--color-border)]"
       }`}
     >
-      <header className="mb-4 flex items-baseline gap-3">
-        <h3 className="font-display text-lg font-semibold tracking-tight">
-          Token allow-list
-        </h3>
-        <span className="eyebrow">Per vault</span>
-      </header>
-      <p className="mb-5 text-xs leading-relaxed text-[var(--color-text-muted)]">
-        Curator-controlled subset of the protocol-level allow-list. When an
-        allowed action declares an output mint, the program checks the mint
-        is on <em>both</em> lists.
-      </p>
+      {/* Slim collapsed strip */}
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+        <span className="eyebrow shrink-0">Allowed output tokens</span>
 
-      <details
-        className="group rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
-        open={candidates.length > 0}
-      >
-        <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium hover:bg-[var(--color-surface-secondary)]">
-          <span className="flex items-center gap-2">
-            <Chevron />
-            Vault tokens
-          </span>
-          <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-muted)]">
-            {summary}
-          </span>
-        </summary>
-
-        <div className="border-t border-[var(--color-border)] p-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {loading ? (
-            <p className="py-4 text-center text-sm text-[var(--color-text-muted)]">
-              Loading…
-            </p>
-          ) : candidates.length === 0 ? (
-            <p className="py-4 text-center text-sm text-[var(--color-text-muted)]">
+            <span className="text-xs text-[var(--color-text-muted)]">loading…</span>
+          ) : enabled.length === 0 ? (
+            <span className="text-xs italic text-[var(--color-text-muted)]">
+              none enabled — swap-style actions will revert
+            </span>
+          ) : (
+            <>
+              {visibleChips.map((c) => {
+                const mintStr = c.mint.toBase58();
+                return (
+                  <Chip key={mintStr} symbol={lookupTokenSymbol(mintStr)} mint={mintStr} />
+                );
+              })}
+              {overflow > 0 && (
+                <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                  +{overflow}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="font-mono text-[10px] tabular-nums text-[var(--color-text-muted)]">
+            {counts.enabled}/{counts.protocol}
+          </span>
+          {dirty && !open && (
+            <span className="font-mono text-[10px] tabular-nums text-[var(--color-accent)]">
+              ·{" "}
+              <span className="text-[var(--color-accent)]">+{toAdd}</span>
+              <span className="text-[var(--color-warning)]">/−{toRemove}</span>{" "}
+              pending
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]/40 hover:text-[var(--color-text-primary)]"
+            aria-expanded={open}
+          >
+            {open ? "Done" : "Edit"}
+            <Chevron open={open} />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded editor — opens inline below the strip */}
+      {open && (
+        <div className="border-t border-[var(--color-border)] bg-[var(--color-surface)]/40 px-4 py-3">
+          {candidates.length === 0 ? (
+            <p className="py-3 text-center text-xs text-[var(--color-text-muted)]">
               No mints on the protocol allow-list yet. Governance must seed
               the list first (see <code>scripts/seed-allowed-tokens.ts</code>).
             </p>
           ) : (
-            <ul
-              className="grid max-h-72 gap-0.5 overflow-y-auto pr-1"
-              style={{
-                // Soft fade at the edges so the list reads as a scrollable
-                // picker rather than a clipped block.
-                maskImage:
-                  "linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%)",
-              }}
-            >
-              {candidates.map((c) => {
-                const mintStr = c.mint.toBase58();
-                const isOn = selected.has(mintStr);
-                const symbol = lookupTokenSymbol(mintStr);
-                const willAdd = !c.enabled && isOn;
-                const willRemove = c.enabled && !isOn;
-                return (
-                  <li
-                    key={mintStr}
-                    className="grid grid-cols-[auto,5rem,1fr,5rem,auto] items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--color-surface-secondary)]"
+            <>
+              <ul className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+                {candidates.map((c) => {
+                  const mintStr = c.mint.toBase58();
+                  const isOn = selected.has(mintStr);
+                  const symbol = lookupTokenSymbol(mintStr);
+                  const willAdd = !c.enabled && isOn;
+                  const willRemove = c.enabled && !isOn;
+                  return (
+                    <li key={mintStr}>
+                      <label
+                        className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-[var(--color-surface-hover)] ${
+                          (!isAdmin || submitting) && "cursor-not-allowed"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isOn}
+                          disabled={!isAdmin || submitting}
+                          onChange={() => toggle(mintStr)}
+                          className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-accent)] disabled:cursor-not-allowed"
+                          aria-label={`Toggle ${symbol ?? mintStr}`}
+                        />
+                        <span className="min-w-0 flex-1 text-sm font-semibold tabular-nums">
+                          {symbol ?? (
+                            <span className="font-normal italic text-[var(--color-text-muted)]">
+                              ?
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className="truncate font-mono text-[10px] text-[var(--color-text-muted)]"
+                          title={mintStr}
+                        >
+                          {truncateAddress(mintStr, 4)}
+                        </span>
+                        {willAdd && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" aria-label="will add" />
+                        )}
+                        {willRemove && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]" aria-label="will remove" />
+                        )}
+                        <CopyButton value={mintStr} ariaLabel={`Copy ${symbol ?? "mint"} address`} />
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
+                <p className="font-mono text-[10px] tabular-nums text-[var(--color-text-muted)]">
+                  {dirty ? (
+                    <>
+                      <span className="text-[var(--color-accent)]">+{toAdd}</span>{" "}
+                      /{" "}
+                      <span className="text-[var(--color-warning)]">−{toRemove}</span>{" "}
+                      pending
+                    </>
+                  ) : (
+                    "no changes pending"
+                  )}
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={!dirty || submitting}
+                    onClick={handleReset}
+                    className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <input
-                      type="checkbox"
-                      checked={isOn}
-                      disabled={!isAdmin || submitting}
-                      onChange={() => toggle(mintStr)}
-                      aria-label={`Toggle ${symbol ?? mintStr}`}
-                      className="h-4 w-4 cursor-pointer accent-[var(--color-accent)] disabled:cursor-not-allowed"
-                    />
-                    <label
-                      htmlFor={mintStr}
-                      onClick={() => toggle(mintStr)}
-                      className="cursor-pointer text-sm font-semibold tabular-nums"
-                    >
-                      {symbol ?? (
-                        <span className="font-normal italic text-[var(--color-text-muted)]">
-                          unknown
-                        </span>
-                      )}
-                    </label>
-                    <span
-                      className="truncate font-mono text-[11px] text-[var(--color-text-muted)]"
-                      title={mintStr}
-                    >
-                      {truncateAddress(mintStr, 6)}
-                    </span>
-                    <span className="text-right font-mono text-[10px] uppercase tracking-wider">
-                      {willAdd && (
-                        <span className="text-[var(--color-accent)]">
-                          will add
-                        </span>
-                      )}
-                      {willRemove && (
-                        <span className="text-[var(--color-warning)]">
-                          will remove
-                        </span>
-                      )}
-                    </span>
-                    <CopyButton
-                      value={mintStr}
-                      ariaLabel={`Copy ${symbol ?? "mint"} address`}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {candidates.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border)] pt-3">
-              <p className="font-mono text-[11px] tabular-nums text-[var(--color-text-muted)]">
-                {dirty ? (
-                  <>
-                    <span className="text-[var(--color-accent)]">
-                      +{toAddCount}
-                    </span>{" "}
-                    /{" "}
-                    <span className="text-[var(--color-warning)]">
-                      −{toRemoveCount}
-                    </span>{" "}
-                    pending
-                  </>
-                ) : (
-                  "no changes pending"
-                )}
-              </p>
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={!dirty || submitting}
-                  onClick={handleReset}
-                  className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  disabled={!dirty || !isAdmin || submitting}
-                  onClick={handleApply}
-                  className="rounded-md bg-[var(--color-accent)] px-4 py-1.5 text-xs font-semibold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submitting ? "applying…" : "Apply"}
-                </button>
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!dirty || !isAdmin || submitting}
+                    onClick={handleApply}
+                    className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {submitting ? "applying…" : "Apply"}
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
 
-          {!isAdmin && (
-            <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-              Read-only — only the vault admin can change this list.
-            </p>
+              {!isAdmin && (
+                <p className="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                  Read-only — only the vault admin can change this list.
+                </p>
+              )}
+            </>
           )}
         </div>
-      </details>
-    </section>
+      )}
+    </div>
   );
 }
 
-function Chevron() {
+function Chip({ symbol, mint }: { symbol: string | null; mint: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-2 py-0.5 text-xs font-medium tabular-nums text-[var(--color-accent)]"
+      title={mint}
+    >
+      {symbol ?? truncateAddress(mint, 3)}
+    </span>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
   return (
     <svg
-      width="12"
-      height="12"
+      width="10"
+      height="10"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -254,9 +259,11 @@ function Chevron() {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
-      className="text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-90"
+      className={`text-[var(--color-text-muted)] transition-transform duration-200 ${
+        open ? "rotate-180" : ""
+      }`}
     >
-      <path d="M9 18l6-6-6-6" />
+      <path d="M6 9l6 6 6-6" />
     </svg>
   );
 }

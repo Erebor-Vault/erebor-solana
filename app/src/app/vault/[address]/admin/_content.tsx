@@ -168,6 +168,7 @@ function AdminContent() {
       </Zone>
 
       <Zone eyebrow="Allocation">
+        <VaultAllowedTokensPanel />
         <div className="grid gap-8 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <StrategyList />
@@ -176,10 +177,6 @@ function AdminContent() {
             <AllocationChart />
           </div>
         </div>
-      </Zone>
-
-      <Zone eyebrow="Configuration">
-        <VaultAllowedTokensPanel />
       </Zone>
 
       <Zone eyebrow="Audit">
