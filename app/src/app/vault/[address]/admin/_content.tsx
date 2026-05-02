@@ -9,7 +9,6 @@ import { AllocationChart } from "@/components/admin/AllocationChart";
 import { PauseToggle } from "@/components/admin/PauseToggle";
 import { PerformanceFeeEditor } from "@/components/admin/PerformanceFeeEditor";
 import { AdminTransferFlow } from "@/components/admin/AdminTransferFlow";
-import { AllowedTokensPanel } from "@/components/admin/AllowedTokensPanel";
 import { VaultAllowedTokensPanel } from "@/components/admin/VaultAllowedTokensPanel";
 import { PausedBanner } from "@/components/vault/PausedBanner";
 import { ActivityFeed } from "@/components/vault/ActivityFeed";
@@ -141,10 +140,6 @@ function AdminContent() {
 
       <AdminTransferFlow />
 
-      <AllowedTokensPanel />
-
-      <VaultAllowedTokensPanel />
-
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <h2 className="text-lg font-semibold mb-4">Strategies</h2>
@@ -152,9 +147,12 @@ function AdminContent() {
         </div>
         <div className="space-y-6">
           <AllocationChart />
-          <ActivityFeed />
         </div>
       </div>
+
+      <VaultAllowedTokensPanel />
+
+      <ActivityFeed />
     </div>
   );
 }

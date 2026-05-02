@@ -6,6 +6,7 @@ import { useVaultAllowedTokens } from "@/hooks/useVaultAllowedTokens";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { truncateAddress } from "@/lib/format";
+import { lookupTokenSymbol } from "@/lib/knownTokens";
 
 /**
  * Per-vault token allow-list editor — admin-controlled (Option B
@@ -118,6 +119,7 @@ export function VaultAllowedTokensPanel() {
               {candidates.map((c) => {
                 const mintStr = c.mint.toBase58();
                 const isOn = selected.has(mintStr);
+                const symbol = lookupTokenSymbol(mintStr);
                 return (
                   <li
                     key={mintStr}
@@ -131,24 +133,35 @@ export function VaultAllowedTokensPanel() {
                         onChange={() => toggle(mintStr)}
                         className="h-4 w-4 cursor-pointer accent-[var(--color-accent)] disabled:cursor-not-allowed"
                       />
-                      <span
-                        className="font-mono text-xs"
-                        title={mintStr}
-                      >
-                        {truncateAddress(mintStr, 8)}
+                      <span className="flex flex-1 items-center gap-2 min-w-0">
+                        {symbol ? (
+                          <span className="font-semibold tabular-nums">
+                            {symbol}
+                          </span>
+                        ) : (
+                          <span className="font-mono text-xs text-[var(--color-text-muted)] italic">
+                            unknown
+                          </span>
+                        )}
+                        <span
+                          className="font-mono text-[10px] text-[var(--color-text-muted)] truncate"
+                          title={mintStr}
+                        >
+                          {truncateAddress(mintStr, 6)}
+                        </span>
                       </span>
                       {c.enabled && !isOn && (
-                        <span className="text-xs text-[var(--color-warning)]">
+                        <span className="text-xs text-[var(--color-warning)] whitespace-nowrap">
                           (will remove)
                         </span>
                       )}
                       {!c.enabled && isOn && (
-                        <span className="text-xs text-[var(--color-accent)]">
+                        <span className="text-xs text-[var(--color-accent)] whitespace-nowrap">
                           (will add)
                         </span>
                       )}
                     </label>
-                    <CopyButton value={mintStr} ariaLabel="Copy mint" />
+                    <CopyButton value={mintStr} ariaLabel={`Copy ${symbol ?? "mint"} address`} />
                   </li>
                 );
               })}

@@ -6,6 +6,7 @@ import { useAllowedTokens } from "@/hooks/useAllowedTokens";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { truncateAddress } from "@/lib/format";
+import { lookupTokenSymbol } from "@/lib/knownTokens";
 
 /** Protocol-level token allow-list manager. Lists every `AllowedToken` PDA
  *  and lets the governance signer add or remove mints. Visible to all on
@@ -108,14 +109,27 @@ export function AllowedTokensPanel() {
           <ul className="mt-2 divide-y divide-[var(--color-border)]">
             {rows.map((r) => {
               const mintStr = r.mint.toBase58();
+              const symbol = lookupTokenSymbol(mintStr);
               return (
                 <li
                   key={mintStr}
-                  className="flex items-center justify-between gap-3 py-2 font-mono text-xs"
+                  className="flex items-center justify-between gap-3 py-2"
                 >
-                  <span className="flex items-center gap-1.5">
-                    <span title={mintStr}>{truncateAddress(mintStr, 8)}</span>
-                    <CopyButton value={mintStr} ariaLabel="Copy mint" />
+                  <span className="flex min-w-0 items-center gap-2">
+                    {symbol ? (
+                      <span className="text-sm font-semibold">{symbol}</span>
+                    ) : (
+                      <span className="text-xs italic text-[var(--color-text-muted)]">
+                        unknown
+                      </span>
+                    )}
+                    <span
+                      className="font-mono text-[10px] text-[var(--color-text-muted)] truncate"
+                      title={mintStr}
+                    >
+                      {truncateAddress(mintStr, 6)}
+                    </span>
+                    <CopyButton value={mintStr} ariaLabel={`Copy ${symbol ?? "mint"} address`} />
                   </span>
                   {isGovernance ? (
                     <button

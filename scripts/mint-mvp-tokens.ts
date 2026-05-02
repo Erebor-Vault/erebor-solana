@@ -99,6 +99,22 @@ async function main() {
   }
 
   console.log(`\nDone. ${added} new mint${added === 1 ? "" : "s"}, ${MVP_TOKEN_LIST.length} total.`);
+
+  // Emit a paste-ready env line so the frontend can resolve mint → symbol.
+  // The frontend reads `NEXT_PUBLIC_TOKEN_SYMBOLS` (a JSON map) at runtime
+  // and the per-vault / protocol allow-list panels use it for display.
+  const symbolMap: Record<string, string> = {};
+  for (const t of MVP_TOKEN_LIST) {
+    const m = existing[t.symbol];
+    if (m) symbolMap[m] = t.symbol;
+  }
+  const envLine = `NEXT_PUBLIC_TOKEN_SYMBOLS='${JSON.stringify(symbolMap)}'`;
+
+  console.log(`\n--- Frontend env (${cluster}) ---`);
+  console.log(`Paste into app/.env.local so the admin panels show symbols`);
+  console.log(`instead of bare mint addresses, then restart \`bun run dev\`:\n`);
+  console.log(envLine);
+  console.log("");
 }
 
 main().catch((err) => {
