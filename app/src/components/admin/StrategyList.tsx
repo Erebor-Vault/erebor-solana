@@ -1,11 +1,24 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStrategies } from "@/hooks/useStrategies";
+import { useAuthorityActions } from "@/hooks/useAuthorityActions";
+import { useVault } from "@/components/providers/VaultProvider";
+import { useRoles } from "@/hooks/useRoles";
+import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { StrategyCard } from "./StrategyCard";
 
 export function StrategyList() {
   const { strategies, loading, refresh } = useStrategies();
+  const { vault } = useVault();
+  const { isAuthority } = useRoles();
+  const { rebalanceAll, loading: rebalanceLoading } = useAuthorityActions();
+  const [rebalancing, setRebalancing] = useState(false);
+
+  const activeStrategies = useMemo(
+    () => strategies.filter((s) => s.isActive),
+    [strategies]
+  );
 
   // Sum of weights across active strategies. The program does NOT cap this
   // (each strategy individually capped at 10 000 bps; aggregate intentionally
@@ -13,12 +26,31 @@ export function StrategyList() {
   // the running total so admins can see the residual reserve buffer or notice
   // an over-allocation before they trigger a rebalance.
   const activeSumBps = useMemo(
-    () =>
-      strategies
-        .filter((s) => s.isActive)
-        .reduce((acc, s) => acc + (s.targetWeightBps ?? 0), 0),
-    [strategies]
+    () => activeStrategies.reduce((acc, s) => acc + (s.targetWeightBps ?? 0), 0),
+    [activeStrategies]
   );
+
+  const handleRebalanceAll = async () => {
+    if (!vault) return;
+    setRebalancing(true);
+    try {
+      const sigs = await rebalanceAll(
+        activeStrategies.map((s) => ({
+          strategyId: s.strategyId.toNumber(),
+          tokenAccount: s.tokenAccount,
+          allocatedAmount: s.allocatedAmount,
+          targetWeightBps: s.targetWeightBps,
+        })),
+        vault.totalDeposited.toNumber()
+      );
+      if (sigs.length > 0) showTxSuccess(sigs[sigs.length - 1]);
+      await refresh();
+    } catch (err) {
+      showTxError(err);
+    } finally {
+      setRebalancing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -45,7 +77,12 @@ export function StrategyList() {
 
   return (
     <div className="space-y-4">
-      <WeightSumBar sumBps={activeSumBps} />
+      <WeightSumBar
+        sumBps={activeSumBps}
+        canRebalance={isAuthority && activeStrategies.length > 0}
+        rebalancing={rebalancing || rebalanceLoading}
+        onRebalance={handleRebalanceAll}
+      />
       {strategies.map((s) => (
         <StrategyCard key={s.publicKey.toBase58()} strategy={s} onRefresh={refresh} />
       ))}
@@ -53,7 +90,17 @@ export function StrategyList() {
   );
 }
 
-function WeightSumBar({ sumBps }: { sumBps: number }) {
+function WeightSumBar({
+  sumBps,
+  canRebalance,
+  rebalancing,
+  onRebalance,
+}: {
+  sumBps: number;
+  canRebalance: boolean;
+  rebalancing: boolean;
+  onRebalance: () => void;
+}) {
   const pct = Math.min(sumBps / 100, 100);
   const reserveBufferBps = Math.max(10000 - sumBps, 0);
   const overAllocated = sumBps > 10000;
@@ -66,15 +113,37 @@ function WeightSumBar({ sumBps }: { sumBps: number }) {
 
   return (
     <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-4">
-      <div className="flex items-baseline justify-between mb-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm font-medium">Active strategy weight sum</span>
-        <span
-          className={`text-sm font-mono ${
-            overAllocated ? "text-[var(--color-danger)]" : "text-[var(--color-text-secondary)]"
-          }`}
-        >
-          {(sumBps / 100).toFixed(2)}% of 100%
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            className={`font-mono text-sm tabular-nums ${
+              overAllocated
+                ? "text-[var(--color-danger)]"
+                : "text-[var(--color-text-secondary)]"
+            }`}
+          >
+            {(sumBps / 100).toFixed(2)}% of 100%
+          </span>
+          <button
+            type="button"
+            onClick={onRebalance}
+            disabled={!canRebalance || rebalancing || overAllocated}
+            title={
+              !canRebalance
+                ? "Authority only"
+                : overAllocated
+                  ? "Over-allocated — lower a weight first"
+                  : "Rebalance every active strategy to its target"
+            }
+            className="inline-flex items-center gap-2 rounded-md border border-[var(--color-accent-secondary)]/30 bg-[var(--color-accent-secondary)]/10 px-3 py-1.5 text-xs font-medium text-[var(--color-accent-secondary)] transition-colors hover:border-[var(--color-accent-secondary)]/60 hover:bg-[var(--color-accent-secondary)]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {rebalancing ? "Rebalancing…" : "Rebalance"}
+            <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+              {(sumBps / 100).toFixed(0)}%
+            </span>
+          </button>
+        </div>
       </div>
       <div
         role="progressbar"

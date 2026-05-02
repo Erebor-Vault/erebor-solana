@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { AdminGuard } from "@/components/admin/AdminGuard";
 import { StrategyList } from "@/components/admin/StrategyList";
@@ -15,11 +14,9 @@ import { PausedBanner } from "@/components/vault/PausedBanner";
 import { ActivityFeed } from "@/components/vault/ActivityFeed";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { useStrategies } from "@/hooks/useStrategies";
-import { useAuthorityActions } from "@/hooks/useAuthorityActions";
 import { useRoles } from "@/hooks/useRoles";
 import { useVault } from "@/components/providers/VaultProvider";
 import { truncateAddress } from "@/lib/format";
-import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 
 export function AdminPageContent() {
   return (
@@ -31,37 +28,8 @@ export function AdminPageContent() {
 
 function AdminContent() {
   const { vault, activeEntry, vaultPda, hasActiveVault } = useVault();
-  const { strategies, refresh } = useStrategies();
-  const { rebalanceAll, loading: rebalanceLoading } = useAuthorityActions();
+  const { refresh } = useStrategies();
   const { isAdmin, isAuthority } = useRoles();
-  const [rebalancing, setRebalancing] = useState(false);
-
-  const activeStrategies = strategies.filter((s) => s.isActive);
-  const totalWeight = activeStrategies.reduce((sum, s) => sum + s.targetWeightBps, 0);
-
-  const handleRebalanceAll = async () => {
-    if (!vault) return;
-    setRebalancing(true);
-    try {
-      const sigs = await rebalanceAll(
-        activeStrategies.map((s) => ({
-          strategyId: s.strategyId.toNumber(),
-          tokenAccount: s.tokenAccount,
-          allocatedAmount: s.allocatedAmount,
-          targetWeightBps: s.targetWeightBps,
-        })),
-        vault.totalDeposited.toNumber()
-      );
-      if (sigs.length > 0) {
-        showTxSuccess(sigs[sigs.length - 1]);
-      }
-      await refresh();
-    } catch (err) {
-      showTxError(err);
-    } finally {
-      setRebalancing(false);
-    }
-  };
 
   if (!hasActiveVault) {
     return (
@@ -125,18 +93,6 @@ function AdminContent() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {activeStrategies.length > 0 && (
-              <button
-                onClick={handleRebalanceAll}
-                disabled={rebalancing || rebalanceLoading}
-                className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-accent-secondary)]/30 bg-[var(--color-accent-secondary)]/10 px-4 py-2 text-sm font-medium text-[var(--color-accent-secondary)] transition-colors hover:border-[var(--color-accent-secondary)]/60 hover:bg-[var(--color-accent-secondary)]/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {rebalancing ? "Rebalancing…" : "Rebalance"}
-                <span className="rounded bg-black/40 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
-                  {(totalWeight / 100).toFixed(0)}%
-                </span>
-              </button>
-            )}
             <CreateStrategyForm onCreated={refresh} />
           </div>
         </div>
