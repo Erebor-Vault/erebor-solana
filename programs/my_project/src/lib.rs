@@ -121,6 +121,26 @@ pub mod my_project {
         instructions::remove_allowed_token::handler(ctx, _mint)
     }
 
+    /// Per-vault, curator-controlled mint allow-list (Option B —
+    /// defense-in-depth). The protocol-level `AllowedToken` PDA must
+    /// already exist for the mint; this only narrows the protocol set
+    /// down to a vault-specific subset. Admin-signed.
+    pub fn add_vault_allowed_token(
+        ctx: Context<AddVaultAllowedToken>,
+        mint: Pubkey,
+    ) -> Result<()> {
+        instructions::add_vault_allowed_token::handler(ctx, mint)
+    }
+
+    /// Closes a per-vault `VaultAllowedToken` PDA, refunding rent to
+    /// the admin. Admin-signed.
+    pub fn remove_vault_allowed_token(
+        ctx: Context<RemoveVaultAllowedToken>,
+        mint: Pubkey,
+    ) -> Result<()> {
+        instructions::remove_vault_allowed_token::handler(ctx, mint)
+    }
+
     // ============================================================
     // ADMIN MANAGEMENT (two-step)
     // ============================================================

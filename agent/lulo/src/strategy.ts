@@ -185,8 +185,9 @@ export class OnChainLuloProtocol implements LuloProtocol {
             callerTokenAta: this.callerTokenAta,
             delegateTokenAta: this.delegateTokenAta,
             targetProgramAccount: this.luloProgramId,
-            // output_mint_index is None for lulo, so this is a placeholder.
+            // output_mint_index is None for lulo, so these are placeholders.
             allowedOutputToken: SystemProgram.programId,
+            vaultAllowedOutputToken: SystemProgram.programId,
             instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
           })
           .remainingAccounts(remainingAccounts)

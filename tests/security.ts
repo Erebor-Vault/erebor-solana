@@ -168,9 +168,11 @@ describe("my_project — phase-3 security", () => {
             callerTokenAta: callerAta,
             delegateTokenAta: callerAta, // delegate == caller here
             targetProgramAccount: mockKamino.programId,
-            // Phase-4d placeholder: action has output_mint_index = None,
-            // so this account is unused. Pass SystemProgram::id as filler.
+            // Phase-4d / Option B placeholders: action has
+            // output_mint_index = None, so these accounts are unused.
+            // Pass SystemProgram::id as filler.
             allowedOutputToken: SystemProgram.programId,
+            vaultAllowedOutputToken: SystemProgram.programId,
             instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
           })
           .remainingAccounts(remaining)
@@ -2281,6 +2283,7 @@ describe("my_project — phase-3 security", () => {
             delegateTokenAta: delegateAta.address,
             targetProgramAccount: targetProgram,
             allowedOutputToken: SystemProgram.programId,
+            vaultAllowedOutputToken: SystemProgram.programId,
             instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
           })
           .remainingAccounts([

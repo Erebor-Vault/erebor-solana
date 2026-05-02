@@ -167,6 +167,18 @@ pub struct AllowedTokenRemoved {
 }
 
 #[event]
+pub struct VaultAllowedTokenAdded {
+    pub vault: Pubkey,
+    pub mint: Pubkey,
+}
+
+#[event]
+pub struct VaultAllowedTokenRemoved {
+    pub vault: Pubkey,
+    pub mint: Pubkey,
+}
+
+#[event]
 pub struct ActionExecuted {
     pub vault: Pubkey,
     pub strategy: Pubkey,

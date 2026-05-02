@@ -90,6 +90,22 @@ pub struct AllowedToken {
     pub bump: u8,
 }
 
+/// Per-vault, curator-controlled mint allow-list entry. Existence of
+/// the PDA at `["vault_allowed_token", vault_state, mint]` narrows the
+/// protocol-level `AllowedToken` allow-list down to the curator's
+/// chosen subset for *this* vault. `execute_action` requires both
+/// PDAs to exist when an `AllowedAction` declares an `output_mint_index`
+/// — defense-in-depth: governance vetoes broken mints globally, the
+/// vault admin further constrains the swap-output universe per vault.
+#[account]
+#[derive(InitSpace)]
+pub struct VaultAllowedToken {
+    pub vault: Pubkey,
+    pub mint: Pubkey,
+    pub bump: u8,
+    pub _reserved: [u8; 32],
+}
+
 /// Phase-5: per-strategy value-source registry entry. A strategy can have
 /// up to `MAX_VALUE_SOURCES_PER_STRATEGY` sources; the live value of the
 /// strategy is the sum across them. Source kinds:

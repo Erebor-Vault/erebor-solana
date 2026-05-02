@@ -1038,6 +1038,10 @@ describe("my_project — phase-3", () => {
       [Buffer.from("allowed_token"), fauxMint.toBuffer()],
       program.programId,
     );
+    const [vaultAllowedTokenPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault_allowed_token"), vaultState.toBuffer(), fauxMint.toBuffer()],
+      program.programId,
+    );
     const callerKp = (await program.account.strategyAllocation.fetch(strategy1.strategy)).delegate;
     // We don't have the delegate's keypair (it's a random keypair), so call
     // as authority instead — same code path, both are accepted by step 1.
@@ -1054,9 +1058,8 @@ describe("my_project — phase-3", () => {
       owner: admin.publicKey,
     });
 
-    // Without adding the token to the allow-list first, the call reverts.
-    try {
-      await program.methods
+    const callExec = () =>
+      program.methods
         .executeAction(new BN(1), targetProgram, [...disc] as any, Buffer.alloc(0))
         .accountsStrict({
           caller: admin.publicKey,
@@ -1068,6 +1071,7 @@ describe("my_project — phase-3", () => {
           delegateTokenAta: delegateAta.address,
           targetProgramAccount: targetProgram,
           allowedOutputToken: allowedTokenPda,
+          vaultAllowedOutputToken: vaultAllowedTokenPda,
           instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .remainingAccounts([
@@ -1076,17 +1080,18 @@ describe("my_project — phase-3", () => {
         ])
         .signers([admin])
         .rpc();
+
+    // Stage 1: neither list whitelists the mint → protocol-level gate fires.
+    try {
+      await callExec();
       assert.fail("expected OutputMintNotAllowed");
     } catch (err) {
       const e = err as AnchorError;
-      // The faux mint isn't whitelisted, so the gate fires before the
-      // (unrelated) target program would have been invoked.
       assert.equal(e.error.errorCode.code, "OutputMintNotAllowed");
     }
 
-    // After whitelisting, the gate passes (the call still fails further
-    // down because the synthetic targetProgram doesn't exist, but with a
-    // different error).
+    // Stage 2: protocol-level entry exists, per-vault list still empty
+    // → the curator-level gate fires (defense-in-depth — Option B).
     await program.methods
       .addAllowedToken(fauxMint)
       .accountsStrict({
@@ -1098,32 +1103,35 @@ describe("my_project — phase-3", () => {
       .rpc();
 
     try {
-      await program.methods
-        .executeAction(new BN(1), targetProgram, [...disc] as any, Buffer.alloc(0))
-        .accountsStrict({
-          caller: admin.publicKey,
-          vaultState,
-          strategy: strategy1.strategy,
-          strategyAuthority: strategy1.strategyAuthority,
-          allowedAction,
-          callerTokenAta: adminUnderlyingAta,
-          delegateTokenAta: delegateAta.address,
-          targetProgramAccount: targetProgram,
-          allowedOutputToken: allowedTokenPda,
-          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
-        })
-        .remainingAccounts([
-          { pubkey: strategy1.strategyTokenAccount, isSigner: false, isWritable: true },
-          { pubkey: fauxMint, isSigner: false, isWritable: false },
-        ])
-        .signers([admin])
-        .rpc();
+      await callExec();
+      assert.fail("expected VaultOutputMintNotAllowed");
+    } catch (err) {
+      const e = err as AnchorError;
+      assert.equal(e.error.errorCode.code, "VaultOutputMintNotAllowed");
+    }
+
+    // Stage 3: both lists whitelist the mint → gate passes; the call
+    // still fails further down because the synthetic targetProgram
+    // doesn't exist, but with a different error.
+    await program.methods
+      .addVaultAllowedToken(fauxMint)
+      .accountsStrict({
+        admin: admin.publicKey,
+        vaultState,
+        allowedToken: allowedTokenPda,
+        vaultAllowedToken: vaultAllowedTokenPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    try {
+      await callExec();
       assert.fail("expected the synthetic target program to fail at invoke_signed");
     } catch (err) {
-      const e = err as AnchorError | { error?: { errorCode?: { code: string } } };
-      const code = (e as AnchorError).error?.errorCode?.code;
-      // Past the OutputMintNotAllowed gate. Anything else is acceptable.
-      assert.notEqual(code, "OutputMintNotAllowed", "gate should have passed after whitelisting");
+      const code = (err as AnchorError).error?.errorCode?.code;
+      assert.notEqual(code, "OutputMintNotAllowed", "protocol gate should have passed");
+      assert.notEqual(code, "VaultOutputMintNotAllowed", "vault gate should have passed");
     }
   });
 });

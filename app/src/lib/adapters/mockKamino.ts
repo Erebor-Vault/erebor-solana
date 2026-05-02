@@ -252,11 +252,13 @@ export const mockKaminoAdapter: RedeemAdapter = {
         callerTokenAta,
         delegateTokenAta,
         targetProgramAccount: MOCK_KAMINO_PROGRAM_ID,
-        // Phase-4d: this adapter's redeem leaves the strategy holding the
-        // SAME underlying mint, so output_mint_index on the AllowedAction
-        // should be `null`. Pass SystemProgram::id as a placeholder; the
-        // program ignores it when the gate isn't enabled.
+        // Phase-4d / Option B: this adapter's redeem leaves the strategy
+        // holding the SAME underlying mint, so output_mint_index on the
+        // AllowedAction should be `null`. Pass SystemProgram::id as a
+        // placeholder for both the protocol-level and per-vault gates;
+        // the program ignores both when output_mint_index is None.
         allowedOutputToken: SystemProgram.programId,
+        vaultAllowedOutputToken: SystemProgram.programId,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .remainingAccounts(remainingAccounts)

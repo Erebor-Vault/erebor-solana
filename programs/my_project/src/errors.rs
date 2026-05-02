@@ -95,6 +95,9 @@ pub enum VaultError {
     #[msg("Output mint is not on the protocol allow-list")]
     OutputMintNotAllowed,
 
+    #[msg("Output mint is not on this vault's curator allow-list")]
+    VaultOutputMintNotAllowed,
+
     #[msg("Output mint index is out of range of remaining_accounts")]
     OutputMintIndexOutOfRange,
 

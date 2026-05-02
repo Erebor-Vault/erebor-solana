@@ -128,9 +128,10 @@ async function executeKaminoAction(
       delegateTokenAta: ctx.delegateTokenAta,
       targetProgramAccount: ctx.kaminoProgramId,
       // output_mint_index is None for all kamino actions, so the vault
-      // doesn't read this account. Pass any program-owned account as a
-      // placeholder per the Anchor IDL's allowance.
+      // doesn't read these accounts. Pass any program-owned account as
+      // a placeholder per the Anchor IDL's allowance.
       allowedOutputToken: SystemProgram.programId,
+      vaultAllowedOutputToken: SystemProgram.programId,
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(remainingAccounts)

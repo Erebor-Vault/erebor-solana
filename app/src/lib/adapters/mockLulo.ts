@@ -151,8 +151,10 @@ export const mockLuloAdapter: RedeemAdapter = {
         targetProgramAccount: MOCK_LULO_PROGRAM_ID,
         // mock_lulo.withdraw doesn't change the held mint, so output_mint_index
         // on the AllowedAction is None. SystemProgram is the standard
-        // placeholder per the IDL doc.
+        // placeholder per the IDL doc — applies to both layers (protocol
+        // allow-list + per-vault curator allow-list).
         allowedOutputToken: SystemProgram.programId,
+        vaultAllowedOutputToken: SystemProgram.programId,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .remainingAccounts(remainingAccounts)

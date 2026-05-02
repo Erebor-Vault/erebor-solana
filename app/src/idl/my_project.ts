@@ -472,6 +472,144 @@ export type MyProject = {
       ]
     },
     {
+      "name": "addVaultAllowedToken",
+      "docs": [
+        "Per-vault, curator-controlled mint allow-list (Option B —",
+        "defense-in-depth). The protocol-level `AllowedToken` PDA must",
+        "already exist for the mint; this only narrows the protocol set",
+        "down to a vault-specific subset. Admin-signed."
+      ],
+      "discriminator": [
+        178,
+        84,
+        157,
+        19,
+        11,
+        164,
+        7,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "allowedToken",
+          "docs": [
+            "The protocol-level allow-list entry must already exist for the",
+            "mint. This enforces the \"per-vault list ⊆ global list\"",
+            "invariant: an admin can only narrow the protocol-approved set,",
+            "never extend it."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultAllowedToken",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "allocateToStrategy",
       "discriminator": [
         167,
@@ -1627,8 +1765,19 @@ export type MyProject = {
           "name": "allowedOutputToken",
           "docs": [
             "be the `[\"allowed_token\", remaining_accounts[index].key()]` PDA",
-            "owned by this program. When `None`, the account is unused. Caller",
-            "passes any account (e.g. SystemProgram::id) as a placeholder."
+            "owned by this program (the protocol-level allow-list — governance",
+            "controlled). When `None`, the account is unused. Caller passes",
+            "any account (e.g. SystemProgram::id) as a placeholder."
+          ]
+        },
+        {
+          "name": "vaultAllowedOutputToken",
+          "docs": [
+            "be the `[\"vault_allowed_token\", vault_state, mint]` PDA owned by",
+            "this program (the per-vault curator allow-list). Defense-in-depth",
+            "alongside `allowed_output_token`: governance vetoes broken mints",
+            "globally, the vault admin further narrows the swap-output universe",
+            "per vault. When `None`, the account is unused."
           ]
         },
         {
@@ -2709,6 +2858,103 @@ export type MyProject = {
         {
           "name": "index",
           "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "removeVaultAllowedToken",
+      "docs": [
+        "Closes a per-vault `VaultAllowedToken` PDA, refunding rent to",
+        "the admin. Admin-signed."
+      ],
+      "discriminator": [
+        74,
+        36,
+        28,
+        49,
+        34,
+        224,
+        121,
+        140
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultAllowedToken",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  108,
+                  108,
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
         }
       ]
     },
@@ -4001,6 +4247,19 @@ export type MyProject = {
       ]
     },
     {
+      "name": "vaultAllowedToken",
+      "discriminator": [
+        236,
+        98,
+        4,
+        5,
+        217,
+        170,
+        162,
+        60
+      ]
+    },
+    {
       "name": "vaultState",
       "discriminator": [
         228,
@@ -4406,6 +4665,32 @@ export type MyProject = {
       ]
     },
     {
+      "name": "vaultAllowedTokenAdded",
+      "discriminator": [
+        209,
+        250,
+        180,
+        73,
+        243,
+        122,
+        135,
+        27
+      ]
+    },
+    {
+      "name": "vaultAllowedTokenRemoved",
+      "discriminator": [
+        95,
+        248,
+        150,
+        53,
+        123,
+        65,
+        36,
+        139
+      ]
+    },
+    {
       "name": "vaultInitialized",
       "discriminator": [
         180,
@@ -4603,81 +4888,86 @@ export type MyProject = {
     },
     {
       "code": 6031,
+      "name": "vaultOutputMintNotAllowed",
+      "msg": "Output mint is not on this vault's curator allow-list"
+    },
+    {
+      "code": 6032,
       "name": "outputMintIndexOutOfRange",
       "msg": "Output mint index is out of range of remaining_accounts"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "actionCooldownActive",
       "msg": "Allowed-action cooldown has not elapsed"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "actionLossExceedsCap",
       "msg": "Loss booked by execute_action exceeds the per-action cap"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "lossCapTooHigh",
       "msg": "Per-action loss cap exceeds protocol maximum"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "siblingInstructionForbidden",
       "msg": "Sibling instruction in this transaction is forbidden by introspection guard"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "deltaOutOfRange",
       "msg": "Signed delta would push allocated_amount negative or overflow"
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "invalidAutoActionKind",
       "msg": "AutoActionConfig kind must be 0 (Deposit) or 1 (Withdraw)"
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "autoActionDataTooLarge",
       "msg": "AutoActionConfig ix_data exceeds the 256-byte cap"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "invalidValueSourceKind",
       "msg": "ValueSource kind must be 0 (SplAtaBalance) or 1 (AccountU64)"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "valueSourceIndexOutOfBounds",
       "msg": "ValueSource index exceeds MAX_VALUE_SOURCES_PER_STRATEGY"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "invalidValueSourceScale",
       "msg": "ValueSource scale_den must be non-zero"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "valueSourceTargetMismatch",
       "msg": "ValueSource target account passed in remaining_accounts does not match the registered target"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "valueSourceTargetTooSmall",
       "msg": "ValueSource target account data is shorter than required offset+8"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "accountMismatch",
       "msg": "Account passed in remaining_accounts does not match the expected key/owner/layout"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "valueSourceTargetIsStrategyAta",
       "msg": "ValueSource target_account must not equal the strategy's own ATA (would double-count)"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "fanOutExceedsDeposit",
       "msg": "Cumulative fan-out from a single deposit cannot exceed the deposit amount"
     }
@@ -5808,6 +6098,76 @@ export type MyProject = {
           {
             "name": "index",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vaultAllowedToken",
+      "docs": [
+        "Per-vault, curator-controlled mint allow-list entry. Existence of",
+        "the PDA at `[\"vault_allowed_token\", vault_state, mint]` narrows the",
+        "protocol-level `AllowedToken` allow-list down to the curator's",
+        "chosen subset for *this* vault. `execute_action` requires both",
+        "PDAs to exist when an `AllowedAction` declares an `output_mint_index`",
+        "— defense-in-depth: governance vetoes broken mints globally, the",
+        "vault admin further constrains the swap-output universe per vault."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "vaultAllowedTokenAdded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vaultAllowedTokenRemoved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
           }
         ]
       }

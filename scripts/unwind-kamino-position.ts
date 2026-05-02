@@ -176,6 +176,7 @@ async function executeAction(
       delegateTokenAta: ctx.agentTokenAta,
       targetProgramAccount: ctx.kaminoProgramId,
       allowedOutputToken: SystemProgram.programId,
+      vaultAllowedOutputToken: SystemProgram.programId,
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(remainingAccounts)

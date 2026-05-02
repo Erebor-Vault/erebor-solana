@@ -78,9 +78,18 @@ pub struct ExecuteAction<'info> {
 
     /// CHECK: When `allowed_action.output_mint_index` is `Some`, this must
     /// be the `["allowed_token", remaining_accounts[index].key()]` PDA
-    /// owned by this program. When `None`, the account is unused. Caller
-    /// passes any account (e.g. SystemProgram::id) as a placeholder.
+    /// owned by this program (the protocol-level allow-list — governance
+    /// controlled). When `None`, the account is unused. Caller passes
+    /// any account (e.g. SystemProgram::id) as a placeholder.
     pub allowed_output_token: AccountInfo<'info>,
+
+    /// CHECK: When `allowed_action.output_mint_index` is `Some`, this must
+    /// be the `["vault_allowed_token", vault_state, mint]` PDA owned by
+    /// this program (the per-vault curator allow-list). Defense-in-depth
+    /// alongside `allowed_output_token`: governance vetoes broken mints
+    /// globally, the vault admin further narrows the swap-output universe
+    /// per vault. When `None`, the account is unused.
+    pub vault_allowed_output_token: AccountInfo<'info>,
 
     /// CHECK: instructions sysvar — used by Phase-5 sibling-instruction
     /// introspection to ensure no other instruction in the same
@@ -167,11 +176,13 @@ pub fn handler<'info>(
         VaultError::RecipientMismatch
     );
 
-    // 4b. Phase-4d: output-mint allow-list. If the action declares an
-    // `output_mint_index`, verify the mint at that slot is whitelisted
-    // by checking that the supplied `allowed_output_token` AccountInfo
-    // is the `["allowed_token", mint]` PDA, owned by this program, with
-    // a positive lamport balance (i.e. live, not closed).
+    // 4b. Output-mint allow-list (Option B — defense-in-depth). If the
+    // action declares an `output_mint_index`, the mint at that slot must
+    // appear on **both** allow-lists:
+    //   - protocol-level `["allowed_token", mint]` (governance controlled)
+    //   - per-vault `["vault_allowed_token", vault_state, mint]` (curator
+    //     controlled)
+    // A live PDA = on the list. Closed account (zero lamports) = removed.
     if let Some(mint_idx) = allowed.output_mint_index {
         let i = mint_idx as usize;
         require!(
@@ -179,18 +190,40 @@ pub fn handler<'info>(
             VaultError::OutputMintIndexOutOfRange
         );
         let mint_account = &ctx.remaining_accounts[i];
-        let (expected_pda, _) = Pubkey::find_program_address(
+
+        // Protocol-level check.
+        let (expected_protocol_pda, _) = Pubkey::find_program_address(
             &[b"allowed_token", mint_account.key().as_ref()],
             &crate::ID,
         );
         require!(
-            ctx.accounts.allowed_output_token.key() == expected_pda,
+            ctx.accounts.allowed_output_token.key() == expected_protocol_pda,
             VaultError::OutputMintNotAllowed
         );
         require!(
             ctx.accounts.allowed_output_token.lamports() > 0
                 && ctx.accounts.allowed_output_token.owner == &crate::ID,
             VaultError::OutputMintNotAllowed
+        );
+
+        // Per-vault curator check.
+        let vault_key = ctx.accounts.vault_state.key();
+        let (expected_vault_pda, _) = Pubkey::find_program_address(
+            &[
+                b"vault_allowed_token",
+                vault_key.as_ref(),
+                mint_account.key().as_ref(),
+            ],
+            &crate::ID,
+        );
+        require!(
+            ctx.accounts.vault_allowed_output_token.key() == expected_vault_pda,
+            VaultError::VaultOutputMintNotAllowed
+        );
+        require!(
+            ctx.accounts.vault_allowed_output_token.lamports() > 0
+                && ctx.accounts.vault_allowed_output_token.owner == &crate::ID,
+            VaultError::VaultOutputMintNotAllowed
         );
     }
 

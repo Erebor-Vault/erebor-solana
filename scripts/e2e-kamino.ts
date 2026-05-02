@@ -551,6 +551,7 @@ async function main() {
       delegateTokenAta: agentTokenAta,
       targetProgramAccount: mockKamino.programId,
       allowedOutputToken: SystemProgram.programId, // unused (no output_mint_index on this action)
+      vaultAllowedOutputToken: SystemProgram.programId,
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(depositRemaining)
@@ -619,6 +620,7 @@ async function main() {
       delegateTokenAta: agentTokenAta,
       targetProgramAccount: mockKamino.programId,
       allowedOutputToken: SystemProgram.programId, // unused (no output_mint_index on this action)
+      vaultAllowedOutputToken: SystemProgram.programId,
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(withdrawRemaining)
@@ -738,6 +740,7 @@ async function main() {
       delegateTokenAta: agentTokenAta,
       targetProgramAccount: mockKamino.programId,
       allowedOutputToken: SystemProgram.programId,
+      vaultAllowedOutputToken: SystemProgram.programId,
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(depositRemaining)
@@ -760,6 +763,7 @@ async function main() {
         delegateTokenAta: agentTokenAta,
         targetProgramAccount: mockKamino.programId,
         allowedOutputToken: SystemProgram.programId,
+        vaultAllowedOutputToken: SystemProgram.programId,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .remainingAccounts(depositRemaining)
@@ -829,6 +833,7 @@ async function main() {
         delegateTokenAta: agentTokenAta,
         targetProgramAccount: mockKamino.programId,
         allowedOutputToken: SystemProgram.programId,
+        vaultAllowedOutputToken: SystemProgram.programId,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .remainingAccounts(depositRemaining)
