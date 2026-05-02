@@ -2,23 +2,83 @@
 @import "tailwindcss";
 
 @theme {
-  --color-surface: #0f1118;
-  --color-surface-secondary: #1a1d2e;
-  --color-surface-hover: #242840;
-  --color-border: #2a2e45;
-  --color-accent: #14f195;
-  --color-accent-secondary: #9945ff;
-  --color-text-primary: #e2e8f0;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-danger: #ef4444;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
+  /* "Forge vault" palette — pulled from the Erebor pitch deck.
+     Deeper ore-blue surface, cyan-mint glow as the primary action color
+     (still Solana-adjacent but pulled toward the deck's energy-vein cyan),
+     warm brass for inscriptions / dividers / the "authority" tone, coal
+     red for blocked/destructive moments. */
+  --color-surface: #08111a;
+  --color-surface-secondary: #11202c;
+  --color-surface-hover: #1a3041;
+  --color-border: #1f3848;
+  --color-border-strong: #2c4d63;
+
+  --color-accent: #5eead4;          /* forge-glow cyan-teal */
+  --color-accent-glow: #7ff0d6;     /* hover/active brighter step */
+  --color-accent-secondary: #d4a24a; /* brass — authority, eyebrows */
+  --color-accent-secondary-glow: #f0c073;
+
+  --color-text-primary: #e6f1f5;
+  --color-text-secondary: #9ab0bd;
+  --color-text-muted: #5c7281;
+
+  --color-danger: #e45337;          /* coal red, slightly muted */
+  --color-success: #5eead4;
+  --color-warning: #d4a24a;
+
+  /* Bound Tailwind's font utilities to next/font's CSS vars (set on <html>
+     in layout.tsx). Display = Bricolage Grotesque (chunky, structural,
+     for hero numerals + H1). Body = Onest. Mono = JetBrains. */
+  --font-sans: var(--font-sans), system-ui, sans-serif;
+  --font-display: var(--font-display), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-mono), ui-monospace, "Menlo", monospace;
 }
 
 body {
   background-color: var(--color-surface);
   color: var(--color-text-primary);
+  /* Layered atmosphere:
+       1. soft cyan glow at top-right (forge core)
+       2. soft brass glow at bottom-left (deep cavern light)
+       3. subtle blueprint hex grid behind everything at 3% opacity
+     Each layer is gentle — they should give the page depth without
+     ever pulling attention away from content. */
+  background-image:
+    radial-gradient(
+      1100px circle at 100% 0%,
+      rgba(94, 234, 212, 0.08),
+      transparent 55%
+    ),
+    radial-gradient(
+      900px circle at 0% 100%,
+      rgba(212, 162, 74, 0.05),
+      transparent 50%
+    ),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='34.64' viewBox='0 0 40 34.64'><path d='M20 0 L40 11.55 L40 23.09 L20 34.64 L0 23.09 L0 11.55 Z' fill='none' stroke='%2300101a' stroke-width='1' opacity='0.6'/></svg>");
+  background-attachment: fixed;
+}
+
+/* Display utility — apply to anything that should feel hero-weight. */
+.font-display {
+  font-family: var(--font-display);
+  font-feature-settings: "ss01" on, "ss02" on;
+  letter-spacing: -0.02em;
+}
+
+/* Inscribed eyebrow — the runic inscription strip language from the deck.
+   Tracking-wide uppercase, brass colored, with two flanking dots. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-accent-secondary);
+}
+
+/* Forge glow — soft cyan halo behind active/hovered numerals + the hero
+   vault name. Low spread so it whispers instead of shouts. */
+.forge-glow {
+  text-shadow: 0 0 12px rgba(127, 240, 214, 0.25);
 }
 
 /* Wallet adapter button overrides */
