@@ -15,11 +15,13 @@
 > [programs/my_project/src/lib.rs](programs/my_project/src/lib.rs)
 > implements today; this document is the gap list.
 >
-> **Repo reality (as of this audit).** Solana / Anchor 0.32.1, Rust
-> 1.89.0, single program `my_project` with id
-> `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B`, Next.js + wallet
-> adapter frontend at [app/](app/), scaffold-only AI agent at
-> [agent/](agent/), Bun as package manager.
+> **Repo reality (as of this audit).** Solana / Anchor 0.32.1, three
+> programs (`my_project` id `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`,
+> `mock_kamino`, `mock_lulo`), Next.js + wallet adapter frontend at
+> [app/](../app/), two runnable AI agents at
+> [agent/lulo/](../agent/lulo/) and
+> [agent/kamino_looper/](../agent/kamino_looper/), Bun as package
+> manager.
 
 ---
 
@@ -38,37 +40,32 @@ trail.
 
 ---
 
-## 2. [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) vs. [programs/my_project/src/lib.rs](programs/my_project/src/lib.rs)
+## 2. [SOLANA_VAULT_SPEC.md](SOLANA_VAULT_SPEC.md) vs. [programs/my_project/src/](../programs/my_project/src/)
 
-The spec is on-theme but reads like documentation of a fully built
-program. In reality, [lib.rs](programs/my_project/src/lib.rs) covers
-roughly **§17 step 1 ("skeleton + share math") + a slice of §17 step 2
-("strategy lifecycle")** and nothing past that. The whole agent layer
-— allowed actions, value sources, `execute_action`, anti-theft,
-introspection — is unbuilt.
+After Phase-3/4/5 the program now covers the full spec surface
+end-to-end: per-strategy authority PDAs, share-math, allow-list,
+`execute_action` with sibling-instruction introspection, treasury fee
+split, value sources + NAV settle, auto-action config, signed-delta
+rebalance, fan-out on deposit, auto-pull on withdraw. The remaining
+gaps are cosmetic (a few defensive error names Anchor's machinery
+already covers) and one optional read-only view (`compute_total_assets`).
 
 Status legend: ✅ shipped · 🟡 partial / divergent · ❌ missing · ➕ extra (not in spec)
 
 ### 2.1 Accounts (spec §5–§6)
 
-Closed in Phase-3 (per-strategy authority refactor — see
-[REFACTOR_PLAN.md](REFACTOR_PLAN.md)):
-
 | Field / account                                  | Status | Notes                                                                                                                                        |
 | ------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VaultState` core fields                         | ✅      | Now: `admin`, `authority`, `token_mint`, `share_mint`, `vault_id`, `total_deposited`, `strategy_count`, `bump`, `share_mint_bump`, `vault_authority_bump`, `paused`, `performance_fee_bps`, `total_active_weight_bps`, `pending_admin`, `pending_authority`. |
+| `VaultState` core fields                         | ✅      | `admin`, `authority`, `token_mint`, `share_mint`, `vault_id`, `total_deposited`, `strategy_count`, `bump`, `share_mint_bump`, `vault_authority_bump`, `paused`, `performance_fee_bps`, `total_active_weight_bps`, `pending_admin`, `pending_authority`, `_reserved: [u8; 64]`. |
 | Separate `vault_authority` signer PDA            | ✅      | Seeds `["vault_authority", vault_state]`. Owns reserve ATA + share mint. Bump cached in `vault_state.vault_authority_bump`.                  |
 | Separate `strategy_authority` signer PDA         | ✅      | Seeds `["strategy_authority", vault_state, strategy_id (u64 LE)]`. Owns strategy *i*'s ATA. Bump cached in `strategy.authority_bump`.        |
-| `AllowedAction` PDA                              | ✅      | Built. `expected_recipient_index` is a required `u16` (audit #8); cross-checked `vault` field on `execute_action` (audit #24).               |
-| `Strategy` (spec) ≡ `StrategyAllocation` (code)  | 🟡     | Renamed. Has `authority_bump` now; still missing `value_source_count`, `action_count`, `deposit_config`, `withdraw_config`, `_reserved`.     |
-
-Still open:
-
-| Field / account                                  | Status | Notes                                                                                                                                        |
-| ------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ValueSource` PDA / inline list                  | ❌      | Required by spec §6/§8.                                                                                                                      |
-| `AutoActionConfig` (`deposit_config` / `withdraw_config` on Strategy) | ❌ | Required by spec §6/§7.5.                                                                                                                    |
-| `_reserved` slack bytes for forward-compat       | ❌      | No realloc cushion. Adding fields will require a migration.                                                                                  |
+| `AllowedAction` PDA                              | ✅      | Required `expected_recipient_index: u16` (audit #8); cross-checked `vault` field on `execute_action` (audit #24); `loss_per_call_bps_cap` + `cooldown_secs` + `last_executed_at` (Phase-5).               |
+| `Strategy` (spec) ≡ `StrategyAllocation` (code)  | 🟡     | Renamed. `authority_bump` + `_reserved: [u8; 32]` cushion shipped. Spec's `value_source_count` / `action_count` / inline `deposit_config` / `withdraw_config` are factored into separate PDAs (`ValueSource`, `AllowedAction`, `AutoActionConfig`) instead of inline.     |
+| `ValueSource` PDA                                | ✅      | One PDA per `(strategy, slot_index)` (Phase-5). Kinds: `SplAtaBalance` (read SPL token amount) and `AccountU64` (read u64 at offset). Includes `scale_num`/`scale_den` for cToken-style exchange rates. |
+| `AutoActionConfig` PDA                           | ✅      | One per `(strategy, kind)` where kind ∈ {0=Deposit, 1=Withdraw}. Records the curator's intended `(target, disc, ix_data)` (Phase-5). Read off-chain by the agent. |
+| `AllowedToken` PDA                               | ✅      | Phase-4d. Protocol-level mint allow-list at `["allowed_token", mint]`. Used by `execute_action` when an action declares `output_mint_index`. |
+| `ProtocolConfig` PDA                             | ✅      | Phase-4a. Singleton at `["protocol_config"]`. Holds `governance`, `treasury`, `protocol_fee_bps`, used for the treasury fee split inside `withdraw`. |
+| `_reserved` slack bytes                          | ✅      | `VaultState` (64 B), `StrategyAllocation` (32 B), `AllowedAction` (32 B), `ValueSource` (32 B), `AutoActionConfig` (variable). Future fields land via realloc, no fresh-mint migration. |
 
 ### 2.2 Instructions (spec §7)
 
@@ -76,105 +73,149 @@ Still open:
 | -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `initialize_vault`                                       | ✅      | Caller becomes admin **and** authority; spec lets them differ at init. Rejects Token-2022 mints with `TransferHook` / `PermanentDelegate` extensions (audit #15).         |
 | `propose_admin` / `accept_admin` / `propose_authority` / `accept_authority` | ✅ | Two-step (audit #21). One-step `transfer_admin` / `set_authority` were removed.                                                                |
-| `deposit`, `withdraw`                                    | 🟡     | No auto-rebalance. Reserve-only — `withdraw` reverts (`InsufficientReserve`) when the reserve can't cover; spec §7.3 / §10 wants per-strategy `pull_funds` in id order.  |
-| `create_strategy`                                        | ✅      | Approves delegate with `u64::MAX` so the agent can later spend. Strategy starts `is_active = true`, `weight_bps = 0`.                                                    |
+| `deposit`                                                | ✅      | Phase-5: optional auto-fan-out. If `remaining_accounts` carries `[strategy_pda, strategy_token_ata]` pairs, deposit pushes `amount × target_weight_bps / 10_000` from reserve into each, signed by `vault_authority`. Empty `remaining_accounts` = back-compat reserve-only path. `FanOutExceedsDeposit` guard blocks duplicate-strategy drains. |
+| `withdraw`                                               | ✅      | Phase-4b auto-pull. If reserve is short, walks `[strategy, strategy_authority, strategy_token]` triples in `remaining_accounts`, signs strategy-side legs with `strategy_authority`. Phase-4a fee split: `protocol_fee_bps` → treasury, remainder → admin. |
+| `create_strategy`                                        | ✅      | Approves delegate with `u64::MAX`. Strategy starts `is_active = true`, `weight_bps = 0`. Dedupe loop rejects duplicate delegate (`DuplicateDelegate`).                    |
 | `set_strategy_weight`                                    | ✅      | Caps at 10 000 bps per strategy **and** enforces sum ≤ 10 000 across active strategies via `vault_state.total_active_weight_bps` (audit #18).                            |
-| `deactivate_strategy`                                    | ✅      | Requires `allocated_amount == 0 && strategy_token_account.amount == 0` upfront (revert: `StrategyStillHoldsFunds`). Caller must drain via `deallocate_from_strategy` first. Permanence ✅. (Spec §7.5 calls for `total_value == 0`; without value-source tracking this is the closest enforceable invariant.) |
-| `set_paused` (admin-only)                                | ✅      | New in this round. Toggles `vault_state.paused`. Emits `PausedToggled`.                                                                                                  |
+| `deactivate_strategy`                                    | ✅      | Requires `allocated_amount == 0 && strategy_token_account.amount == 0` upfront (revert: `StrategyStillHoldsFunds`). Permanence ✅. |
+| `set_paused`                                             | ✅      | Admin-only. Toggles `vault_state.paused`. Emits `PausedToggled`.                                                                                                         |
 | `set_delegate` (spec) → `update_strategy_delegate` (code)| 🟡     | Renamed. Functionality matches.                                                                                                                                          |
-| `add_allowed_action` / `remove_allowed_action`           | ✅      | Built. `expected_recipient_index` is required `u16` (audit #8).                                                                                                          |
-| `add_value_source` / `remove_value_source`               | ❌      | Required for spec §7.5 + §8.                                                                                                                                             |
-| `set_deposit_config` / `set_withdraw_config`             | ❌      | Required for spec §7.5 + §10.                                                                                                                                            |
-| `push_funds` / `pull_funds` (internal helpers)           | 🟡     | Exposed as **public** instructions `allocate_to_strategy` / `deallocate_from_strategy`. Spec wants them internal, called from `deposit` / `withdraw` / `rebalance`.        |
-| `rebalance(strategy_id, delta: i64)`                     | 🟡     | Current `rebalance_strategy` is **authority-only** (audit #5) but still weight-driven (computes `target = total_deposited × weight / 10_000`). Spec §7.6 wants explicit signed `delta`; deferred.                                                          |
-| `execute_action` ⭐ (spec §7.7)                          | 🟡     | Built; sibling-instruction introspection deferred. See §2.3.                                                                                                              |
-| `compute_total_assets` (optional view, spec §8)          | ❌      |                                                                                                                                                                          |
-| `report_yield`                                           | ➕     | Not in spec. Reads the strategy's actual SPL balance, computes `actual - allocated_amount`, increments `total_deposited`. Useful but inconsistent with spec's "NAV via value sources, no `reportYield` path" model. |
-| `report_loss`                                            | ➕     | Not in spec, paired with `report_yield` (audit #6). Authority-only; subtracts from `strategy.allocated_amount` and `vault_state.total_deposited`.                          |
+| `add_allowed_action` / `remove_allowed_action`           | ✅      | Required `expected_recipient_index: u16`; plus Phase-5 `loss_per_call_bps_cap` + `cooldown_secs`.                                                                         |
+| `add_value_source` / `remove_value_source`               | ✅      | Phase-5. Per-strategy registry; `settle_strategy_value` reads them and books the signed delta into both `strategy.allocated_amount` and `vault.total_deposited`.         |
+| `set_auto_action_config` / `clear_auto_action_config`    | ✅      | Phase-5. Spec called these `set_deposit_config` / `set_withdraw_config`; this implementation uses a single ix dispatched on `kind` (0=Deposit, 1=Withdraw).              |
+| `allocate_to_strategy` / `deallocate_from_strategy`      | 🟡     | Public authority-only instructions. Spec wants them as internal helpers; auto-fan-out on `deposit` and auto-pull on `withdraw` cover the spec's user-facing flow, so these are kept as authority-side emergency moves. |
+| `rebalance_strategy`                                     | ✅      | Authority-only (audit #5). Weight-driven: `target = total_deposited × weight / 10_000`.                                                                                  |
+| `rebalance_with_delta(delta: i64)`                       | ✅      | Phase-5. Spec §7.6's explicit signed-delta entrypoint. Authority-only; reverts on overflow / underflow / insufficient reserve.                                            |
+| `execute_action` ⭐ (spec §7.7)                          | ✅      | Full validation chain incl. sibling-instruction introspection. See §2.3.                                                                                                  |
+| `settle_strategy_value`                                  | ✅      | Phase-5. Reads the strategy's `ValueSource` registry, sums into a live `computed_value`, books `delta_signed = computed_value − allocated_amount` into both `strategy.allocated_amount` and `vault.total_deposited`. Replaces the spec's `compute_total_assets` write path. |
+| `compute_total_assets` (optional view, spec §8)          | ❌      | Read-only NAV aggregator. The write path is `settle_strategy_value`; a no-side-effect view ix has not been added. Low value with `settle_strategy_value` and indexer-side aggregation in place. |
+| `report_yield`                                           | ➕     | Not in spec. Reads strategy's actual SPL balance, computes `actual − allocated_amount`, increments `total_deposited`. Coexists with `settle_strategy_value` (Phase-5) which is the more general value-source-driven version. |
+| `report_loss`                                            | ➕     | Authority-only counterpart to `report_yield` (audit #6). Subtracts from `strategy.allocated_amount` and `vault_state.total_deposited`.                                    |
+| `initialize_protocol_config` / `set_treasury` / `set_protocol_fee_bps` / `set_governance` | ➕ | Phase-4a protocol-level governance — not spec'd, supports the treasury fee split inside `withdraw`. |
+| `add_allowed_token` / `remove_allowed_token`             | ➕     | Phase-4d protocol-level mint allow-list, gates `output_mint_index` on swap-style allowed actions.                                                                         |
 
 ### 2.3 `execute_action` validation chain (spec §7.7)
 
-🟡 Built **except** for sibling-instruction introspection (audit #7,
-deferred). The chain that *is* implemented:
+✅ Full chain implemented:
 
-1. Caller is `strategy.delegate` OR `vault_state.authority`.
-2. `target_program` AccountInfo matches the requested key.
-3. `AllowedAction` PDA exists for `(strategy, target_program,
-   discriminator)`; its cached `vault` field is cross-checked
-   (audit #24).
-4. Required `expected_recipient_index` (audit #8) — the relayed
-   instruction's `accounts[index]` must equal `strategy.token_account`.
-5. Pre-snapshot **both** caller's ATA balance and `strategy.delegate`'s
-   ATA balance (audit #30 revised).
-6. `invoke_signed` with **`strategy_authority[i]`** seeds.
-7. Post-reload both ATAs; revert with `AntiTheft` if either grew.
-
-What's still missing: the spec also wants the program to walk the
-`instructions` sysvar and reject the transaction if any *sibling*
-instruction (i.e. another instruction in the same tx) is a Token
-program transfer signed by the delegate against their own ATA, or
-otherwise touches strategy ATAs from outside `agent_vault`. Without
-that walk, an attacker who controls the agent key can stage a
-sibling Token::transfer in the same tx (the agent already has
-delegate auth on the strategy ATA) and the balance-snapshot
-anti-theft won't see it. Defer to a follow-up; the per-strategy
-authority refactor blunts the worst-case blast radius (a compromised
-agent on strategy *i* can only drain strategy *i*).
+1. **Sibling-instruction introspection (audit #7).** Walk the
+   `instructions` sysvar; reject the tx if any *other* instruction in
+   the same tx has `strategy.token_account` at any meta slot
+   (`SiblingInstructionForbidden`). This is more aggressive than the
+   spec proposal — it covers both the "delegate-signed Token::transfer
+   in a sibling ix" and the "side-channel siphon via a third program"
+   cases without having to special-case the SPL Token program ID.
+2. Caller is `strategy.delegate` OR `vault_state.authority`
+   (`CallerNotDelegateOrAuthority`).
+3. `target_program` AccountInfo matches the requested key
+   (`TargetProgramMismatch`).
+4. `AllowedAction` PDA exists for `(strategy, target_program,
+   discriminator)`; cached `vault` field is cross-checked (audit #24).
+   Cooldown check (`ActionCooldownActive`) and `loss_per_call_bps_cap`
+   bound enforced (Phase-5).
+5. Required `expected_recipient_index` (audit #8) — the relayed
+   instruction's `accounts[index]` must equal `strategy.token_account`
+   (`RecipientMismatch`).
+6. Optional `output_mint_index` — if set, the mint at that meta slot
+   must be on the `AllowedToken` allow-list (`OutputMintNotAllowed`).
+7. Pre-snapshot **both** caller's ATA balance and
+   `strategy.delegate`'s ATA balance (audit #30) and the strategy
+   ATA's balance for the per-action loss cap.
+8. `invoke_signed` with **`strategy_authority[i]`** seeds.
+9. Post-reload all three ATAs; revert with `AntiTheft` if caller or
+   delegate ATA grew, or `ActionLossExceedsCap` if strategy ATA fell
+   by more than `loss_per_call_bps_cap × allocated_amount / 10_000`.
+10. Update `last_executed_at` (cooldown bookkeeping). Emit `ActionExecuted`.
 
 ### 2.4 Share math (spec §9)
 
-✅ Closed. `VIRTUAL_SHARES = 1_000_000` baked into both deposit and
-withdraw share math (u128 widening + downcast guard). First
-depositor receives `amount × 10^6` shares, not 1:1 — the donate-to-vault
-inflation grief is no longer profitable.
+✅ `VIRTUAL_SHARES = 1_000_000` baked into both deposit and withdraw
+share math (u128 widening + downcast guard). First depositor receives
+`amount × 10^6` shares; donate-to-vault inflation grief is not
+profitable.
 
 ### 2.5 Events (spec §11)
 
-🟡 14 of the 17 spec events emit today. Implemented in this round:
-`VaultInitialized`, `Deposited`, `Withdrawn`, `StrategyCreated`,
-`StrategyAllocated`, `StrategyDeallocated`, `StrategyWeightSet`,
-`DelegateUpdated`, `StrategyDeactivated`, `YieldReported`,
-`Rebalanced`, `AdminTransferred`, `AuthoritySet`, `PausedToggled`.
+✅ All spec events emit, plus Phase-4/5 additions:
 
-Still missing (blocked on the upstream features being built):
-`AllowedActionAdded`, `AllowedActionRemoved`, `ActionExecuted`,
-`ValueSourceAdded`, `ValueSourceRemoved`, `DepositConfigSet`,
-`WithdrawConfigSet`. The spec's `FundsPushed` / `FundsPulled`
-correspond to the existing `StrategyAllocated` /
-`StrategyDeallocated` events (different name, same semantics).
+- Spec coverage: `VaultInitialized`, `Deposited`, `Withdrawn`,
+  `StrategyCreated`, `StrategyAllocated`, `StrategyDeallocated`,
+  `StrategyWeightSet`, `DelegateUpdated`, `StrategyDeactivated`,
+  `YieldReported`, `Rebalanced`, `AdminTransferred`, `AuthoritySet`,
+  `PausedToggled`, `AllowedActionAdded`, `AllowedActionRemoved`,
+  `ActionExecuted`, `ValueSourceAdded`, `ValueSourceRemoved`,
+  `AutoActionConfigSet` (≡ spec's `DepositConfigSet` / `WithdrawConfigSet`,
+  unified on `kind`), `AutoActionConfigCleared`.
+- Extras: `LossReported`, `AdminProposed`, `AuthorityProposed`,
+  `AllowedTokenAdded`, `AllowedTokenRemoved`, `PerformanceFeeCharged`,
+  `PerformanceFeeSet`, `ProtocolConfigInitialized`, `TreasurySet`,
+  `ProtocolFeeBpsSet`, `GovernanceSet`, `StrategyValueSettled`.
+
+The spec's `FundsPushed` / `FundsPulled` correspond to the existing
+`StrategyAllocated` / `StrategyDeallocated` events (different name,
+same semantics).
 
 ### 2.6 Errors (spec §11)
 
-🟡 11 of ~25 spec error variants exist (`InsufficientBalance`,
-`InsufficientReserve`, `StrategyInactive`, `UnauthorizedAdmin`,
-`UnauthorizedAuthority`, `InvalidMint`, `ZeroAmount`,
-`WeightExceedsMax`, `InsufficientReserveForRebalance`, `VaultPaused`,
-`StrategyStillHoldsFunds`). Missing —
-mostly because the underlying features are missing — `AntiTheft`,
-`ActionNotAllowed`, `RecipientMustBeStrategy`,
-`DelegateSignedSplTransferInTx`, `MathOverflow`,
-`TargetIsAsset` / `TargetIsSelf` /
-`TargetIsVault` / `TargetIsSystemProgram` / `TargetIsTokenProgram`,
-`CallFailed`, `ValueSourceFailed`, `NotInitialized`,
-`AlreadyInitialized`, `DataTooShort`, `NotDelegateNorAuthority`,
-`StrategyDoesNotExist`, `StrategyAlreadyDeactivated`, `WeightTooHigh`
-(spelled `WeightExceedsMax`), `InsufficientIdle`,
-`InsufficientLiquidity`, `NotVault`, `RecipientMustBeStrategy`.
+✅ Spec coverage closed. Canonical map of spec name → shipped name:
+
+| Spec error                          | Shipped as                    |
+| ----------------------------------- | ----------------------------- |
+| `AntiTheft`                         | `AntiTheft`                   |
+| `ActionNotAllowed`                  | `ActionNotAllowed`            |
+| `RecipientMustBeStrategy`           | `RecipientMismatch`           |
+| `DelegateSignedSplTransferInTx`     | `SiblingInstructionForbidden` (broader — any sibling that touches the strategy ATA) |
+| `MathOverflow`                      | `MathOverflow`                |
+| `InsufficientLiquidity`             | `InsufficientLiquidity`       |
+| `NotDelegateNorAuthority`           | `CallerNotDelegateOrAuthority`|
+| `WeightTooHigh`                     | `WeightExceedsMax`            |
+| `InsufficientIdle`                  | `InsufficientReserve`         |
+
+Anchor's macro infrastructure handles the rest of the spec list
+(`NotInitialized`, `AlreadyInitialized`, `DataTooShort`,
+`StrategyDoesNotExist`, `StrategyAlreadyDeactivated`, `NotVault`)
+through account constraints and discriminator checks, so dedicated
+error variants aren't needed.
+
+Defensive target-classification errors (`TargetIsAsset`, `TargetIsSelf`,
+`TargetIsVault`, `TargetIsSystemProgram`, `TargetIsTokenProgram`,
+`CallFailed`, `ValueSourceFailed`) were not added — sibling-ix
+introspection + the recipient pin + the output-mint allow-list cover
+the threat space the spec used those errors for. Add only if a
+specific attack path the existing checks miss is identified.
+
+Phase-5 added: `ActionCooldownActive`, `ActionLossExceedsCap`,
+`LossCapTooHigh`, `SiblingInstructionForbidden`, `DeltaOutOfRange`,
+`InvalidAutoActionKind`, `AutoActionDataTooLarge`,
+`InvalidValueSourceKind`, `InvalidValueSourceScale`,
+`ValueSourceIndexOutOfBounds`, `ValueSourceTargetMismatch`,
+`ValueSourceTargetIsStrategyAta`, `ValueSourceTargetTooSmall`,
+`FanOutExceedsDeposit`.
 
 ### 2.7 Token-2022 (spec §13)
 
-✅ Closed. `initialize_vault` rejects mints that carry the
-`TransferHook` or `PermanentDelegate` extension (`MintHasTransferHook`
-/ `MintHasPermanentDelegate`). Classic SPL Token mints have no
+✅ `initialize_vault` rejects mints that carry the `TransferHook` or
+`PermanentDelegate` extension (`MintHasTransferHook` /
+`MintHasPermanentDelegate`). Classic SPL Token mints have no
 extensions and are accepted unchanged.
 
 ### 2.8 Auto-rebalance (spec §10)
 
-❌ Deposits land in the reserve and stay there. Withdrawals can only
-be filled from the reserve. The "weighted fan-out on deposit, pull in
-id order on withdraw" model lives only in the spec; the existing
-`rebalance_strategy` instruction is a separate, post-hoc, permissionless
-keeper call that anyone can trigger.
+✅ Closed.
+
+- **Deposit fan-out**: if the depositor passes `[strategy_pda, strategy_token_ata]`
+  pairs in `remaining_accounts`, deposit pushes funds out by weight,
+  signed by `vault_authority` ([deposit.rs](../programs/my_project/src/instructions/deposit.rs)).
+- **Withdraw auto-pull**: if the reserve can't cover, withdraw walks
+  `[strategy, strategy_authority, strategy_token]` triples and pulls
+  underlying back to reserve in caller order
+  ([withdraw.rs](../programs/my_project/src/instructions/withdraw.rs)).
+- **Rebalance**: `rebalance_strategy` (weight-driven) and
+  `rebalance_with_delta` (signed-delta) are both authority-only.
+
+The TS-side adapter framework at [app/src/lib/adapters/](../app/src/lib/adapters/)
+stacks redeem CPIs ahead of withdraws when an external position needs
+to be unwound first.
 
 ---
 
@@ -193,10 +234,10 @@ against [app/src/](app/src/):
 | Activity feed                                   | ✅      | [ActivityFeed.tsx](app/src/components/vault/ActivityFeed.tsx) — bootstrap from `getSignaturesForAddress` + `getTransaction`, then live `connection.onLogs` subscription. Decodes events via Anchor's `BorshEventCoder`. Filtered to the active vault. |
 | RPC proxy                                       | ❌      | Web3.js calls hit the Solana RPC directly.                                                                                                                                           |
 | Strategy create / weight / delegate / deactivate UI | ✅  | [CreateStrategyForm.tsx](app/src/components/admin/CreateStrategyForm.tsx), [StrategyCard.tsx](app/src/components/admin/StrategyCard.tsx), [StrategyList.tsx](app/src/components/admin/StrategyList.tsx). Weight slider lives inside `StrategyCard`. |
-| Allowed-action whitelist editor                 | ❌      | Blocked on §2.1.                                                                                                                                                                     |
-| Deposit/withdraw config editor                  | ❌      | Blocked on §2.1.                                                                                                                                                                     |
-| Value-source registration UI                    | ❌      | Blocked on §2.1.                                                                                                                                                                     |
-| Authority manual rebalance                      | 🟡     | A `rebalanceAll` button exists in [app/src/app/admin/page.tsx](app/src/app/admin/page.tsx) (wired through [useAuthorityActions.ts](app/src/hooks/useAuthorityActions.ts)). No signed-delta push/pull radio per spec §14. |
+| Allowed-action whitelist editor                 | 🟡     | Program-side ready. Frontend hooks `useAllowedActions.tsx` + `useAdminActions.ts` exist; full editor UI (per-strategy preset list + custom ix-data builder) still TODO. |
+| Auto-action config editor                       | ❌      | Program-side ready (`set_auto_action_config` / `clear_auto_action_config`). UI not built.                                                                                            |
+| Value-source registration UI                    | ❌      | Program-side ready (`add_value_source` / `remove_value_source` / `settle_strategy_value`). UI not built.                                                                             |
+| Authority manual rebalance                      | 🟡     | A `rebalanceAll` button exists in [app/src/app/admin/page.tsx](app/src/app/admin/page.tsx). Program supports both weight-driven `rebalance_strategy` and signed-delta `rebalance_with_delta`; the signed-delta push/pull UI per spec §14 is not built yet. |
 | Pause toggle + paused banner                    | ✅      | [PauseToggle.tsx](app/src/components/admin/PauseToggle.tsx) (admin-only, disable-not-hide via `useRoles`); [PausedBanner.tsx](app/src/components/vault/PausedBanner.tsx) on `/` and `/admin`. |
 | Sum-cap UX warning                              | ✅      | Running weight-sum bar in [app/src/components/admin/StrategyList.tsx](app/src/components/admin/StrategyList.tsx). Warns when over-allocated; shows reserve buffer % when under. |
 | `useRoles` hook (per-control role flags)        | ✅      | [useRoles.ts](app/src/hooks/useRoles.ts) — used by `PauseToggle` for disable-not-hide. `AdminGuard` still wraps `/admin` for now; per-control disabling can roll out incrementally without rewriting the gate. |
@@ -223,25 +264,26 @@ The [app/src/hooks/](app/src/hooks/) inventory:
 
 ---
 
-## 4. Off-chain agent
+## 4. Off-chain agents
 
-🟡 [agent/src/](agent/src/) now ships a runnable harness — entry point
-[agent/src/index.ts](agent/src/index.ts) boots a polling loop that
-reads strategy state via PDA derivation
-([agent/src/vault-client.ts](agent/src/vault-client.ts)), asks an
-advisor what to do
-([agent/src/llm-advisor.ts](agent/src/llm-advisor.ts) — rule-based
-baseline, Claude-backed when `ANTHROPIC_API_KEY` is set, with a
-cooldown wrapper to bound LLM spend), and dispatches to mocked
-lend/withdraw stubs ([agent/src/strategy.ts](agent/src/strategy.ts)).
-`bun run start` works end-to-end against devnet for a vault the agent
-is the delegate of.
+✅ Two runnable agents ship today, both calling on-chain via
+`execute_action`:
 
-The lend / withdraw paths stay **mocked** until the spec's
-`execute_action` whitelist gateway (§2.3) is in place — without it
-the agent has no on-chain proof that an inner protocol call is
-sandboxed, which is the whole reason for the gateway. AI_PLAN.md
-describes the eventual two-step Lulo flow that will replace the mock.
+- [agent/lulo/](../agent/lulo/) — Lulo lending agent. Polls vault
+  state, decides lend/redeem against `mock_lulo`, dispatches via
+  `execute_action(LULO_PROGRAM, lend_disc | withdraw_disc, ix_data)`.
+  Claude-backed advisor when `ANTHROPIC_API_KEY` is set, rule-based
+  baseline otherwise.
+- [agent/kamino_looper/](../agent/kamino_looper/) — leveraged-loop
+  agent against `mock_kamino`. Manages a deposit/borrow loop with
+  `INTERMEDIATE_HF_FLOOR = 1.10` (above mock_kamino's `HF_MIN_BPS =
+  10_500`), routes deposits/withdraws/borrows/repays through
+  `execute_action` with per-strategy authority signing.
+- [agent/shared/](../agent/shared/) — common chain-layer helpers
+  (PDA derivations, `execute_action` builders).
+
+Both run end-to-end against devnet. The `execute_action` whitelist
+gateway (§2.3) is in place, so neither uses the mock-stub fallback.
 
 ---
 
@@ -249,16 +291,12 @@ describes the eventual two-step Lulo flow that will replace the mock.
 
 The repo's root-level docs are Solana-themed and broadly accurate:
 
-- [README.md](../README.md) — lists 10 instructions that match
-  [lib.rs](programs/my_project/src/lib.rs) exactly, plus a
-  documentation index. ✅
-- [OVERVIEW.md](OVERVIEW.md) — high-level explainer (this file's §1
-  documents how it was rewritten in this round). ✅
-- [PLAN.md](PLAN.md) — implementation plan; "Phase 5 cleanup" has
-  open items, none blocking.
-- [DEPLOYMENT.md](DEPLOYMENT.md) — program id
-  `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` matches
-  [Anchor.toml](Anchor.toml). ✅
+- [README.md](../README.md) — documentation index. ✅
+- [OVERVIEW.md](OVERVIEW.md) — high-level explainer.
+- [PLAN.md](PLAN.md) — historical implementation plan.
+- [DEPLOYMENT.md](DEPLOYMENT.md) — live program id
+  `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo` matches
+  [Anchor.toml](../Anchor.toml).
 - [AI_PLAN.md](AI_PLAN.md) — design for the unbuilt agent.
 - [CLAUDE.md](../CLAUDE.md) — the rewritten long-form contributor guide
   (this file's §1 documents what it replaced).

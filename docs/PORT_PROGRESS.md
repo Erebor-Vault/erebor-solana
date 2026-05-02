@@ -43,6 +43,18 @@ da82835  port: bring mock_lulo program from main
 once we touch them** — they don't know about `mock_lulo` or the new
 `mock_kamino` borrow/repay. Tests get fixed in step 7.
 
+## Status — port complete
+
+All 8 steps shipped on `main`. Live program id
+`FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`. Both agents
+(`agent/lulo/`, `agent/kamino_looper/`) run end-to-end against devnet
+through `execute_action`. Phase-5 (`ValueSource` + NAV settle,
+`AutoActionConfig`, signed-delta rebalance, sibling-instruction
+introspection, fan-out on deposit, `_reserved` cushions) shipped on
+top.
+
+The historical step-by-step log is preserved below for reference.
+
 ## Completed
 
 ### Step 1 — Import OLD_Erebor tree (commit `8b699bc`)
@@ -88,9 +100,13 @@ Instruction names match real Kamino's `klend` (`borrow_obligation_liquidity`,
 `repay_obligation_liquidity`) so anchor discriminators are
 mainnet-compatible.
 
-## Remaining
+## Completed (cont.)
 
-### Step 5 — Port agents (rewrite chain calls for `execute_action`)
+The following sections were the original "remaining" plan; all shipped
+in commits visible in `git log` on `main` (steps 5/5a/5b/5c/6/7/8).
+Kept here as historical reference of what changed.
+
+### Step 5 — Port agents (rewrite chain calls for `execute_action`) ✅
 
 Largest remaining piece. The agent's chain layer needs total rewrite because
 OLD_Erebor's `execute_action` differs from this repo's
@@ -150,7 +166,7 @@ Setup scripts that need rewrites because of the changed instruction layout:
 - `scripts/crank-yield.ts` — call `simulate_yield` (OLD_Erebor's name) for
   both mock_lulo and mock_kamino.
 
-### Step 6 — Add mockLulo RedeemAdapter + update frontend
+### Step 6 — Add mockLulo RedeemAdapter + update frontend ✅
 
 `app/src/lib/adapters/` already has the framework from OLD_Erebor:
 - `types.ts` — `RedeemAdapter` interface, `ProtocolPosition` shape
@@ -178,7 +194,7 @@ Need:
   understand obligations. May need an "unwind loop" version that repays
   borrows first.
 
-### Step 2 (deferred) — Split monolith
+### Step 2 — Split monolith ✅
 
 `programs/my_project/src/lib.rs` is 2607 lines. Split into:
 
@@ -201,7 +217,7 @@ Need:
 Mechanical work, no behavior change. Run `anchor build` + the original
 tests after to confirm no regression.
 
-### Step 7 — Redeploy + setup
+### Step 7 — Redeploy + setup ✅
 
 After 5/6/2:
 
@@ -221,47 +237,11 @@ After 5/6/2:
    session: open loop → verify ProtocolPosition synced → close → frontend
    shows correct values).
 
-## Known issues / gotchas
-
-- **Tests are stale.** `tests/my_project.ts` and `tests/security.ts` are
-  OLD_Erebor's. They still pass on this branch (they don't reference
-  mock_lulo or mock_kamino borrow/repay), but they need to be extended in
-  step 7.
-- **Setup scripts are OLD_Erebor's.** `scripts/setup-multi-vaults.ts` uses
-  the OLD_Erebor `execute_action` whitelist format. The newer scripts from
-  newArch (`init-kamino-position.ts`, etc.) aren't on this branch and
-  shouldn't be ported as-is — they target this repo's old account layouts.
-  Step 5 will rewrite them on top of the new layout.
-- **`agent_keypair.json`** isn't on this branch (it's gitignored). User
-  must keep using their existing one when running setup scripts.
-- **Devnet state is decoupled.** The currently-deployed programs (`B7EUo8…`,
-  `3YSjEZC…`, `S4taBh…`) are still live and being driven by `newArch`. They
-  won't stop working until step 7 redeploy.
-- **mock_kamino discriminator change.** OLD_Erebor's `init_reserve` /
-  `deposit_reserve_liquidity_and_obligation_collateral` etc. have
-  different anchor discriminators than this repo's `initialize_oracle` /
-  `deposit`. Anything calling the old names will break — agents, scripts,
-  frontend adapters all need updates.
-
 ## Resuming
 
-```bash
-git checkout port-old-erebor
-git log --oneline main..HEAD     # see the 3 port commits
-anchor build                      # confirm baseline still builds
-# then start step 5, agent rewrite
-```
-
-Suggested prompt for the next session:
-
-> Continue path B port from commit 9fbe5f9 on branch `port-old-erebor`.
-> Steps remaining: (5) rewrite agent/kamino_looper/src/chain/vault.ts to
-> use OLD_Erebor's `execute_action` per-strategy authority + mandatory
-> recipient pin, refit allocator/leverageManager for cToken model, do the
-> same for agent/lulo; (6) add mockLulo RedeemAdapter + rewrite
-> useStrategies.ts; (2 deferred) split programs/my_project/src/lib.rs into
-> instructions/ modules; (7) redeploy all programs and rerun setup scripts.
-> See PORT_PROGRESS.md for full context.
+The port is complete and merged on `main`. Live program id
+`FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`. For ongoing work see
+[FOLLOWUPS.md](FOLLOWUPS.md).
 
 ## Design decisions
 

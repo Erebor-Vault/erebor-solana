@@ -7,9 +7,9 @@ together and shows current status.
 
 | # | Task | Plan | Status |
 |---|---|---|---|
-| 1 | Security audit + fixes + per-strategy authority refactor | [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | 🔧 in progress (concurrent session) |
-| 2 | Comprehensive program tests (invariants + fuzz) | [TEST_PLAN.md](TEST_PLAN.md) | ⏳ planned |
-| 3 | E2E test with mocked Kamino + simulated AI agent | [E2E_KAMINO.md](E2E_KAMINO.md) | 🟡 mock program + harness shipped, runs after task 1 |
+| 1 | Security audit + fixes + per-strategy authority refactor | [REFACTOR_PLAN.md](REFACTOR_PLAN.md) | ✅ done (Phase-3) |
+| 2 | Comprehensive program tests (invariants + fuzz) | [TEST_PLAN.md](TEST_PLAN.md) | 🟡 [tests/security.ts](../tests/security.ts) covers `execute_action` negative paths extensively; invariant + fuzz suites still ⏳ |
+| 3 | E2E test with mocked Kamino + simulated AI agent | [E2E_KAMINO.md](E2E_KAMINO.md) | ✅ done — agent + mock_kamino end-to-end via `execute_action` |
 | 4 | Playwright frontend E2E with mocked wallet | [PLAYWRIGHT_PLAN.md](PLAYWRIGHT_PLAN.md) | ⏳ planned |
 
 Legend: 🔧 in progress · 🟡 partially shipped · ⏳ planned · ✅ done

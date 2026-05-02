@@ -8,21 +8,16 @@
 
 ## Snapshot of where we are
 
-| Phase | Shipped | Commit | Devnet tx |
-|-------|---------|--------|-----------|
-| 3 | per-strategy authority PDAs + 30 audit fixes | `0b2c31d` | `47gjnkMW…` |
-| 4a | Treasury fee split via ProtocolConfig PDA | `85a493d` | `3J1watnX…` |
-| 4b | Auto-pull on withdraw from strategy ATAs | `dc91199` | `VUi8EAwX…` |
-| 4c | TS adapter framework + mockKamino + Redeem button | `6495738` | n/a (no program change) |
-| 4d | Protocol-level token allow-list | `5769d83` | `5yrwS6rn…` |
+| Phase | Shipped |
+|-------|---------|
+| 3 | per-strategy authority PDAs + 30 audit fixes |
+| 4a | Treasury fee split via ProtocolConfig PDA |
+| 4b | Auto-pull on withdraw from strategy ATAs |
+| 4c | TS adapter framework + mockKamino + Redeem button |
+| 4d | Protocol-level token allow-list |
+| 5 | Value sources + NAV settle, AutoActionConfig, signed-delta rebalance, allowed-action loss caps + cooldown, sibling-instruction introspection, fan-out on deposit, `_reserved` cushions |
 
-State on devnet: Program at `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B`,
-ProtocolConfig at `FBLN6W67RHM84iHJLgGGBmwCmNaFhGjaz24yM6Ni1pPT`, USDC
-mint `5BTPntEh…` whitelisted, 5 vaults / 17 strategies seeded by
-`scripts/setup-multi-vaults.ts`.
-
-Tests: `anchor test` is 28/28 green locally. Frontend `tsc --noEmit` is
-clean.
+Live program id: `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`.
 
 ---
 
@@ -149,105 +144,38 @@ verify and fill that when whitelisting.
 
 ## C. Program followups
 
-### C1. Sibling-instruction introspection on `execute_action` (audit #7)
+### C1–C6. Closed by Phase-5
 
-The current anti-theft snapshot only sees the inner CPI dispatched by
-`execute_action`. A compromised agent (delegate) can bundle a sibling
-`Token::transfer` ix in the same transaction draining the strategy's
-ATA via their delegate authority — the snapshot won't fire.
+- ✅ **C1 — Sibling-instruction introspection** ([execute_action.rs](../programs/my_project/src/instructions/execute_action.rs)). Walks the `instructions` sysvar; rejects any sibling ix that touches `strategy.token_account` at any meta slot via `SiblingInstructionForbidden`. Broader than the original C1 proposal — covers delegate-signed Token::transfer *and* third-program siphons without special-casing the SPL Token program.
+- ✅ **C2 — AutoActionConfig** ([set_auto_action_config.rs](../programs/my_project/src/instructions/set_auto_action_config.rs), [clear_auto_action_config.rs](../programs/my_project/src/instructions/clear_auto_action_config.rs)). One PDA per `(strategy, kind)` recording `(target, disc, ix_data)`. Read off-chain by the agent; on-chain auto-invoke deferred (see C3 below).
+- ✅ **C3 — Fan-out on deposit + auto-pull on withdraw** ([deposit.rs](../programs/my_project/src/instructions/deposit.rs), [withdraw.rs](../programs/my_project/src/instructions/withdraw.rs)). Caller passes strategy account triples in `remaining_accounts`; deposit pushes by weight, withdraw pulls in caller order. The `withdraw_config`-driven auto-CPI is still off-chain (TS adapter orchestrator at [app/src/lib/adapters/](../app/src/lib/adapters/)); on-chain auto-invoke remains deferred.
+- ✅ **C4 — ValueSource + settle** ([add_value_source.rs](../programs/my_project/src/instructions/add_value_source.rs), [remove_value_source.rs](../programs/my_project/src/instructions/remove_value_source.rs), [settle_strategy_value.rs](../programs/my_project/src/instructions/settle_strategy_value.rs)). Per-strategy registry of `(kind, target, offset, scale)` entries. `settle_strategy_value` reads them, sums into a live `computed_value`, books the signed delta into both `strategy.allocated_amount` and `vault.total_deposited`. The read-only `compute_total_assets` view is **still missing** (write path is sufficient for indexer-side aggregation; add only if needed).
+- ✅ **C5 — `rebalance_with_delta`** ([rebalance_with_delta.rs](../programs/my_project/src/instructions/rebalance_with_delta.rs)). Authority-only, signed `delta: i64`.
+- ✅ **C6 — `_reserved` cushions** on `VaultState` (64 B), `StrategyAllocation` (32 B), `AllowedAction` (32 B), `ValueSource` (32 B).
 
-**Fix**: walk `instructions` sysvar inside `execute_action` and reject
-the tx if any *other* instruction in the same tx:
-- Targets the SPL Token program AND signs the strategy ATA's delegate
-  authority. (Indicates direct drain.)
-- Targets a program other than `target_program_account` AND has the
-  strategy ATA as a writable account. (Indicates side-channel siphon.)
+### C7. Read-only `compute_total_assets` view (spec §8)
 
-**Where**: `programs/my_project/src/lib.rs::execute_action`. Add a new
-account `instructions_sysvar: AccountInfo<'info>` with `address =
-sysvar::instructions::id()`. Use `solana_program::sysvar::instructions::load_*`
-helpers.
+The write path (`settle_strategy_value`) is shipped, so an indexer
+can compute NAV by replaying `StrategyValueSettled` events. A pure
+read-only view ix would let the frontend / agent compute live NAV
+without booking a delta.
 
-**Effort**: 1 day program + tests. Important for production.
+**Recommendation**: defer. The Phase-4c TS adapter framework already
+covers the "live NAV in the dashboard" UX, and `settle_strategy_value`
+covers the "book the delta into accounting" need. Add only if a
+consumer needs strict on-chain NAV without a state mutation.
 
-### C2. AutoActionConfig storage on Strategy (spec §6/§7.5)
+### C8. On-chain auto-invoke of `AutoActionConfig` on deposit / withdraw
 
-Per-strategy `deposit_config` / `withdraw_config: Option<AutoActionConfig>`.
-Lets the program pick which `AllowedAction` to auto-invoke during
-auto-rebalance (when that lands — see C3) without the frontend
-pre-flighting.
+`AutoActionConfig` is read off-chain today. The spec-purist version
+would have `deposit` / `withdraw` auto-CPI into the recorded
+`(target, disc, ix_data)` per strategy.
 
-**Storage**: extend `StrategyAllocation` with two `Option<AutoActionConfig>`
-fields. Each `AutoActionConfig = (allowed_action_pda, ix_data_template)`.
-Layout-breaking — devnet vaults need re-init.
-
-**Setters**: `set_deposit_config`, `set_withdraw_config`, both admin-
-only.
-
-**Effort**: 1 day storage + setters. The auto-invoke side waits for C3.
-
-### C3. Auto-rebalance on deposit / `withdraw_config` invocation
-
-The spec wants `deposit` to fan out into strategies by weight, and
-`withdraw` to auto-invoke each strategy's `withdraw_config` to redeem
-external positions before pulling. C3 = the program-side auto-invoke.
-Today's Phase-4c does this from the frontend (TS orchestrator); C3
-moves it on-chain.
-
-**Tradeoffs vs current TS path**:
-- Pro: works without an active frontend / agent. Simpler client-side.
-- Con: protocol-specific account-derivation logic ends up in Rust;
-  every new protocol is a program upgrade. Compute and account-meta
-  budgets get tight with N strategies × M accounts each.
-
-**Recommendation**: defer until at least one of:
-- Two consumer types (frontend + bot + indexer) need the same logic.
-- Real users hit the "agent down → withdraw stuck" failure mode.
-- Compute / account costs in the TS path become problematic.
-
-The Phase-4c TS path already covers the "vault redeems from external
-protocol on withdraw" UX the user originally asked for; C3 is the
-spec-purist version, not a UX win on top.
-
-### C4. ValueSource + `compute_total_assets` (spec §6 / §8)
-
-Replaces the current `report_yield` / `report_loss` accounting with
-NAV-from-positions. Each strategy stores a list of `ValueSource`
-entries (target program + reader discriminator + account-list
-template). `compute_total_assets` walks them, CPIs into each, parses
-the returned underlying value, sums.
-
-**Hard part**: each protocol returns a different shape. Spec assumes
-uniform `u64` return; reality has Kamino's `ObligationCollateral`
-(cToken × ratio), Marginfi's `BalanceData`, Drift's `SpotPosition`
-unrealised PnL, etc. Each needs a Rust adapter inside the program.
-
-**Recommendation**: don't ship this until you have a concrete reason
-to drop `report_yield` (e.g. auditor flags it). The current
-admin-reported model is functional and simpler.
-
-**Effort**: 5–7 days for the framework + 2–3 days per protocol
-adapter.
-
-### C5. `rebalance(strategy_id, delta: i64)` with explicit signed delta
-
-Today's `rebalance_strategy` is weight-driven: it computes
-`target = total_deposited × weight / 10_000`. Spec §7.6 wants the
-authority to pass a signed `delta: i64` directly. Useful when the
-authority wants to override the weight-driven target without changing
-weights.
-
-**Effort**: ½ day. Add an alternative entrypoint, leave the existing
-one in place for back-compat.
-
-### C6. `_reserved` slack bytes on `VaultState` / `Strategy`
-
-Realloc cushion so future fields can land without a fresh-mint
-migration. Spec §5. Add `pub _reserved: [u8; 64]` to each. Tests
-will need re-init on a fresh mint.
-
-**Effort**: 1 hour. Bundle with whichever next layout-breaking change
-ships.
+**Tradeoff**: same as the original C3 — protocol-specific
+account-derivation logic ends up in Rust, and compute / account-meta
+budgets get tight with N strategies. Defer until two consumer types
+need the same logic, or until users hit the "agent down → withdraw
+stuck" failure mode in practice.
 
 ---
 
@@ -269,20 +197,19 @@ discoverability.
 
 ### D2. Activity feed
 
-Real component reading event logs from the program (`program.addEventListener`
-or polling `getSignaturesForAddress` + decoding via IDL). Today the
-frontend has the [ActivityFeed](app/src/components/vault/ActivityFeed.tsx)
-component but it's empty / mock.
-
-**Effort**: 2 days. Decide between in-browser (simple, lossy) vs. an
-indexer (Helius / Triton / your own). The events all exist already
-post-Phase-3.
+✅ Shipped — [ActivityFeed.tsx](../app/src/components/vault/ActivityFeed.tsx)
+bootstraps from `getSignaturesForAddress` + `getTransaction`, then
+subscribes via `connection.onLogs`, decodes with Anchor's
+`BorshEventCoder`. May want an indexer-backed version later for
+deep history; the in-browser path is sufficient for live operations.
 
 ### D3. Per-strategy NAV display
 
-Once C4 lands, surface `compute_total_assets` per strategy in the
-admin dashboard. Until then, the dashboard's "allocated_amount" is
-point-in-time accounting only.
+Surface live NAV per strategy in the admin dashboard by reading each
+strategy's `ValueSource` registry and computing the same sum
+`settle_strategy_value` would book. The frontend can then show a
+"drift since last settle" indicator and offer a button that calls
+`settle_strategy_value` on demand.
 
 ---
 
@@ -322,38 +249,29 @@ Once B1 lands, write a scripted test that:
 
 ---
 
-## F. Agent (separate workstream)
+## F. Agents
 
-[agent/src/](agent/src/) is empty. [AI_PLAN.md](AI_PLAN.md) describes
-the intended design. This is its own multi-week project — out of scope
-for "follow up Phase 4" but unblocks a lot of what C3 was about.
+✅ Two agents shipped: [agent/lulo/](../agent/lulo/) and
+[agent/kamino_looper/](../agent/kamino_looper/), both routing through
+`execute_action` against `mock_lulo` / `mock_kamino`. See
+[OVERVIEW.md](OVERVIEW.md) and the agent-specific READMEs.
 
-Minimum viable agent:
-1. Reads vault + strategy state on a polling loop.
-2. Decides per strategy whether to deposit-into-protocol or
-   redeem-back-from-protocol based on a yield rule.
-3. Builds and submits `execute_action` ixs using the adapters from
-   `app/src/lib/adapters/` (publish them as a shared `@erebor/adapters`
-   workspace package — easier than copy-paste).
-4. Logs every decision + tx. Persists state to disk.
-5. CLI: `bun agent --vault <pda> --interval 60s`.
-
-Skeleton work is in [AI_PLAN.md](AI_PLAN.md). The Anthropic SDK
-scaffold in `agent/package.json` exists.
+Open agent followups:
+- Real Kamino mainnet adapter (B1 above) — would replace `mock_kamino`
+  as the loop target.
+- Real Lulo mainnet adapter — same shape as B1.
+- `@erebor/adapters` shared workspace package — both agents currently
+  duplicate parts of the chain layer that belong in
+  [app/src/lib/adapters/](../app/src/lib/adapters/).
 
 ---
 
 ## G. Documentation
 
-- [OVERVIEW.md](OVERVIEW.md) — section 8 ("NAV") still describes the
-  spec model. Either rewrite to match the shipped `report_yield` /
-  `report_loss` model, or wait for C4.
-- [MISMATCHES.md](MISMATCHES.md) — §2.3 still says introspection
-  deferred. After C1, update or close that row.
+- [OVERVIEW.md](OVERVIEW.md) — verify NAV section reflects
+  `settle_strategy_value` / `ValueSource` flow.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — keep refreshing the "current"
   section after every devnet upgrade.
-- [CLAUDE.md](../CLAUDE.md) — Phase 4d's token allow-list isn't
-  mentioned. Add a short paragraph under "Architecture".
 - [REFACTOR_PLAN.md](REFACTOR_PLAN.md) — historical, leave alone.
 
 ---
@@ -362,10 +280,8 @@ scaffold in `agent/package.json` exists.
 
 If you're a fresh Claude session: read this file, then
 [CLAUDE.md](../CLAUDE.md), then ask the user which item to start with.
-Don't try to do all of B + C + D in one turn — each is a multi-commit
-workstream.
 
-**Recommended next move**: A1 (transfer DeFi Alpha admin) is one
-click; A2 (devnet smoke test) catches anything we missed in 4a–4d
-before more code gets layered on. Then B1 (real Kamino) since the
-mockKamino path proved the framework works.
+**Recommended next move**: B1 (real Kamino mainnet adapter) since the
+mockKamino path proved the framework, and D1/D2/D3 (allowed-action
+editor + value-source UI + auto-action config UI) since the
+program-side is fully shipped and the frontend lags.

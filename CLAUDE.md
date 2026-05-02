@@ -10,10 +10,10 @@ co-located:
 - **Anchor program** at [programs/my_project/](programs/my_project/) — `src/lib.rs`, `Cargo.toml`. Single program crate.
 - **Tests** at [tests/my_project.ts](tests/my_project.ts) — TypeScript integration tests with ts-mocha + chai, using the Anchor IDL types regenerated from `target/types/` after every `anchor build`.
 - **Frontend** at [app/](app/) — Next.js 16.2.1 (App Router), React 19, TypeScript, Tailwind 4, `@solana/wallet-adapter-react`, `@coral-xyz/anchor`. Separate `package.json`.
-- **Agent scaffold** at [agent/](agent/) — `solana-agent-kit` + `@anthropic-ai/sdk`. `src/` is **not yet implemented**; only `package.json` + `tsconfig.json`. See [docs/AI_PLAN.md](docs/AI_PLAN.md).
+- **AI agents** at [agent/](agent/) — two runnable agents: [agent/lulo/](agent/lulo/) (lending against `mock_lulo`) and [agent/kamino_looper/](agent/kamino_looper/) (leveraged loop against `mock_kamino`). Shared chain-layer helpers in [agent/shared/](agent/shared/). Both route through `execute_action` with per-strategy authority signing. See [docs/AI_PLAN.md](docs/AI_PLAN.md).
 - **Scripts** at [scripts/](scripts/) — TS scripts that drive deploy / vault init / strategy creation / yield simulation against devnet (or local validator).
 - **Migrations** at [migrations/deploy.ts](migrations/deploy.ts) — Anchor deploy stub (empty body — real deploys go through [scripts/deploy.sh](scripts/deploy.sh) and the `init-vault.ts` family).
-- **Anchor config** at [Anchor.toml](Anchor.toml), workspace at [Cargo.toml](Cargo.toml). Program id pinned to `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` on devnet, localnet, and mainnet.
+- **Anchor config** at [Anchor.toml](Anchor.toml), workspace at [Cargo.toml](Cargo.toml). Program id pinned to `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo` on devnet, localnet, and mainnet. Two mock targets (`mock_kamino`, `mock_lulo`) ship in the same workspace.
 
 Spec, deployment, and design context worth reading before changing
 behavior (in roughly this order):
@@ -82,16 +82,20 @@ cluster default). `NEXT_PUBLIC_TOKEN_MINT` overrides the default
 asset mint; without it the app falls back to the first entry in
 `VAULT_REGISTRY` ([app/src/lib/constants.ts](app/src/lib/constants.ts)).
 
-### Agent (run from [agent/](agent/))
+### Agents (run from [agent/lulo/](agent/lulo/) or [agent/kamino_looper/](agent/kamino_looper/))
 
 ```bash
 cp .env.example .env     # fill in ANTHROPIC_API_KEY + agent keypair + RPC
 bun install
-bun run start            # tsx src/index.ts — currently fails: src/ is empty
+bun run start            # boots polling loop, signs execute_action ixs
 ```
 
-The agent is a scaffold. See [docs/AI_PLAN.md](docs/AI_PLAN.md) for the
-intended design.
+Both agents read vault + strategy state, pick `lend` / `redeem` (Lulo)
+or deposit / borrow / repay / withdraw (Kamino looper), and dispatch
+through `execute_action` against the corresponding mock program. The
+`execute_action` whitelist gateway is in place, so neither uses
+mock-stub fallbacks. See [docs/AI_PLAN.md](docs/AI_PLAN.md) for the
+broader design.
 
 ## Architecture
 
@@ -147,12 +151,15 @@ Critical consequences for any change:
    `execute_action` with strategy *j*'s accounts in
    `remaining_accounts`, the inner CPI's authority signer is wrong
    and the call reverts.
-3. **`execute_action` is fully built** (Phase-2). Allowed-action
+3. **`execute_action` is fully built** (Phase-2/4/5). Allowed-action
    whitelist via `AllowedAction` PDAs; required `expected_recipient_index`;
-   pre/post snapshot of *both* caller's ATA and `strategy.delegate`'s
-   ATA — anti-theft fires if either grows. Sibling-instruction
-   introspection (instruction sysvar walking) is still deferred — see
-   [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md).
+   optional `output_mint_index` against the protocol-level
+   `AllowedToken` allow-list; pre/post snapshot of caller's ATA,
+   `strategy.delegate`'s ATA, and the strategy ATA itself (with a
+   `loss_per_call_bps_cap` ceiling); per-action `cooldown_secs` rate
+   limit; sibling-instruction introspection that rejects any other tx
+   instruction touching `strategy.token_account`. See
+   [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md) for the full chain.
 4. **Two-step admin / authority transfer.** `propose_admin` +
    `accept_admin` (and `_authority` analogues). Until the recipient
    accepts from their own keypair, the live admin/authority field is
@@ -176,20 +183,31 @@ Critical consequences for any change:
 2. CPI `token::transfer` from `user_token_ata` → reserve ATA.
 3. CPI `token::mint_to` (signed by **`vault_authority`**) → user share ATA.
 4. `vault_state.total_deposited = checked_add(amount)`.
+5. **Optional fan-out (Phase-5).** If the caller passes
+   `[strategy_pda, strategy_token_ata]` pairs in `remaining_accounts`,
+   the program pushes `amount × strategy.target_weight_bps / 10_000`
+   from reserve into each strategy's ATA, signed by `vault_authority`.
+   Inactive / zero-weight strategies are skipped. The cumulative
+   pushed total is capped at `amount` (revert: `FanOutExceedsDeposit`)
+   so duplicate `(strategy, ata)` chunks can't drain pre-existing
+   reserve liquidity. Empty `remaining_accounts` = back-compat
+   reserve-only path.
 
 `withdraw(shares_to_burn)`:
 
 1. Compute `underlying = shares × (assets + 1) / (supply + VIRTUAL_SHARES)`
    in u128, then downcast to u64 with overflow guard.
-2. Require `reserve_ata.amount >= underlying` (audit #25 — checked
-   first, before any work). Reverts with `InsufficientReserve` if
-   short; an authority must call `deallocate_from_strategy` or
-   `rebalance_strategy` to free up reserve.
+2. **Auto-pull (Phase-4b).** If `reserve_ata.amount < underlying`,
+   walk `[strategy, strategy_authority, strategy_token]` triples in
+   `remaining_accounts` and pull underlying back to reserve in caller
+   order, signed by `strategy_authority[i]`. If the shortfall can't
+   be covered after the loop, revert with `InsufficientLiquidity`.
 3. CPI `token::burn` user shares.
-4. CPI `token::transfer` (signed by **`vault_authority`**) reserve →
-   `user_token_ata`. Then a second transfer of the performance fee
-   to the admin's ATA (created on demand via `init_if_needed` —
-   audit #11).
+4. **Fee split (Phase-4a).** `total_fee_bps = vault_state.performance_fee_bps`;
+   `protocol_fee_bps` from `ProtocolConfig`. CPI transfers
+   (signed by `vault_authority`): user gets `underlying − total_fee`,
+   treasury gets `protocol_fee_bps × underlying / 10_000`, admin gets
+   the remainder.
 5. `total_deposited = checked_sub(underlying)`.
 
 ### Strategy lifecycle
@@ -216,30 +234,38 @@ Critical consequences for any change:
   `total_active_weight_bps` by the strategy's prior weight, marks
   `is_active = false`, sets weight to 0.
 
-### Rebalancing + yield/loss (manual today)
+### Rebalancing + accounting
 
-Four rebalancing/accounting entrypoints:
+Authority-only entrypoints:
 
-- `allocate_to_strategy(amount)` — authority-only. CPI transfer
-  reserve → strategy ATA, signed by **`vault_authority`** (the
-  reserve's owner). Increments `strategy.allocated_amount`.
-- `deallocate_from_strategy(amount)` — authority-only. CPI transfer
-  strategy ATA → reserve, signed by **`strategy_authority[i]`** (the
-  strategy ATA's owner). Decrements `allocated_amount`. Pause-gated
-  (audit #19).
-- `rebalance_strategy()` — **authority-only** (audit #5). Recomputes
-  `target = total_deposited * weight_bps / 10_000`, then signs the
+- `allocate_to_strategy(amount)` / `deallocate_from_strategy(amount)`
+  — direct moves between reserve and strategy ATAs. Mostly
+  emergency / cleanup; the user-facing flows now do this implicitly
+  via deposit fan-out and withdraw auto-pull.
+- `rebalance_strategy()` — weight-driven. Recomputes
+  `target = total_deposited × weight_bps / 10_000`, then signs the
   appropriate leg: in-leg with `vault_authority`, out-leg with
   `strategy_authority[i]`.
-- `report_yield()` — authority-only. Reads strategy ATA balance,
-  treats surplus over `allocated_amount` as yield, increments
-  `total_deposited`. Pause-gated (audit #20). Mint of the strategy
-  ATA is constrained to `vault_state.token_mint` (audit #14).
-- `report_loss(amount)` — authority-only, NEW (audit #6). Subtracts
-  `amount` from both `strategy.allocated_amount` and
-  `vault_state.total_deposited`; reverts if it'd underflow either.
-  This is the counterpart to `report_yield` for booking realised
-  losses (e.g. a slashing event or an external position write-down).
+- `rebalance_with_delta(delta: i64)` — explicit signed-delta version
+  (Phase-5). Pushes if positive (reserve → strategy, signed by
+  `vault_authority`), pulls if negative (strategy → reserve, signed
+  by `strategy_authority[i]`). Reverts on overflow / underflow.
+
+Accounting:
+
+- `report_yield()` — reads strategy ATA balance, treats surplus over
+  `allocated_amount` as yield, increments `total_deposited`.
+  Pause-gated. Strategy ATA mint constrained to `vault_state.token_mint`.
+- `report_loss(amount)` — counterpart for booking realised losses
+  (slashing, position write-down). Subtracts from both
+  `strategy.allocated_amount` and `vault_state.total_deposited` with
+  underflow guards.
+- `settle_strategy_value()` (Phase-5) — value-source-driven.
+  Iterates the strategy's `ValueSource` registry, sums into a live
+  `computed_value`, books the signed delta into both
+  `strategy.allocated_amount` and `vault_state.total_deposited`.
+  Replaces `report_yield` / `report_loss` for protocols where NAV
+  can be derived from on-chain reads.
 
 ### Mock yield (testnet)
 
@@ -254,31 +280,51 @@ cronjob).
 
 ### Action whitelisting + anti-theft
 
-`execute_action` is built. The validation chain at
-[lib.rs](programs/my_project/src/lib.rs):
+`execute_action` ([programs/my_project/src/instructions/execute_action.rs](programs/my_project/src/instructions/execute_action.rs)).
+Validation chain:
 
-1. Caller must be `strategy.delegate` OR `vault_state.authority`.
-2. The `target_program` AccountInfo must match the requested key.
-3. An `AllowedAction` PDA must exist at
-   `["allowed_action", strategy, target_program, discriminator]` —
-   that PDA's `vault` and `strategy` fields are cross-checked
-   (audit #24 closes the cross-vault-PDA hole).
-4. `expected_recipient_index` is required (audit #8, no longer
-   `Option`). `remaining_accounts[expected_recipient_index]` must
-   equal `strategy.token_account` — pins the strategy ATA into the
-   relayed instruction at a known slot.
-5. Pre-snapshot **both** `caller_token_ata.amount` and
-   `delegate_token_ata.amount` (audit #30 — covers the case where
-   the authority is caller but the relayed ix routes funds to the
-   agent's wallet).
-6. `invoke_signed` the relayed instruction with **`strategy_authority[i]`**
-   seeds. Inside the metas, mark `strategy_authority` as a signer.
-7. Reload both ATAs; revert with `AntiTheft` if either grew.
+1. **Sibling-instruction introspection.** Walk the `instructions`
+   sysvar; reject the tx (`SiblingInstructionForbidden`) if any
+   *other* instruction in the same tx has `strategy.token_account`
+   at any meta slot. Covers both delegate-signed Token::transfer
+   smuggles and side-channel siphons via third programs.
+2. Caller must be `strategy.delegate` OR `vault_state.authority`.
+3. The `target_program` AccountInfo must match the requested key.
+4. An `AllowedAction` PDA must exist at
+   `["allowed_action", strategy, target_program, discriminator]`;
+   `vault` field cross-checked. Cooldown
+   (`cooldown_secs`/`last_executed_at`) and per-action loss cap
+   (`loss_per_call_bps_cap`) enforced.
+5. Required `expected_recipient_index`:
+   `remaining_accounts[index]` must equal `strategy.token_account`.
+6. Optional `output_mint_index`: if set, the mint at that meta slot
+   must be in the protocol-level `AllowedToken` allow-list.
+7. Pre-snapshot caller ATA, delegate ATA, **and** strategy ATA.
+8. `invoke_signed` with `strategy_authority[i]` seeds.
+9. Post-reload all three ATAs. Revert `AntiTheft` if caller or
+   delegate grew; revert `ActionLossExceedsCap` if strategy ATA fell
+   beyond the per-action loss cap. Update `last_executed_at`. Emit
+   `ActionExecuted`.
 
-What's still **deferred** (see [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md)):
-sibling-instruction introspection via the instructions sysvar. The
-balance snapshot catches direct siphons but not multi-instruction
-attacks where the agent stages a Token::transfer in a sibling ix.
+### Auto-action config + value sources (Phase-5)
+
+Two declarative registries the agent reads off-chain:
+
+- **`AutoActionConfig`** — one PDA per `(strategy, kind)` where
+  `kind ∈ {0=Deposit, 1=Withdraw}`. Records the curator's intended
+  `(target_program, discriminator, ix_data)` for what the strategy
+  should do when funds enter or leave. Read off-chain by the agent;
+  on-chain auto-CPI is a future phase. Set via
+  `set_auto_action_config`; cleared (rent reclaim) via
+  `clear_auto_action_config`.
+- **`ValueSource`** — per-strategy registry, up to
+  `MAX_VALUE_SOURCES_PER_STRATEGY` slots per strategy. Two kinds:
+  `SplAtaBalance` reads the SPL token amount at offset 64..72;
+  `AccountU64` reads a u64 at a configurable offset. Each entry
+  carries `scale_num`/`scale_den` for cToken-style exchange-rate
+  conversions. `settle_strategy_value` walks the registry, sums
+  into `computed_value`, books the signed delta into both
+  `strategy.allocated_amount` and `vault_state.total_deposited`.
 
 ### Frontend architecture
 
@@ -310,8 +356,10 @@ attacks where the agent stages a Token::transfer in a sibling ix.
   rebalance-all). The spec's per-vault `/vault/[chainId]/[address]`
   routes are not yet implemented; the active vault is held in the
   `VaultProvider` context.
-- **No activity feed.** Blocked on the program adding `#[event]`
-  emissions — see [docs/MISMATCHES.md §2.5](docs/MISMATCHES.md).
+- **Activity feed shipped.** [app/src/components/vault/ActivityFeed.tsx](app/src/components/vault/ActivityFeed.tsx)
+  bootstraps from `getSignaturesForAddress` + `getTransaction`, then
+  subscribes to `connection.onLogs`. Decodes events via Anchor's
+  `BorshEventCoder`, filtered to the active vault.
 
 ## Test conventions
 
@@ -322,54 +370,49 @@ attacks where the agent stages a Token::transfer in a sibling ix.
   (regenerated by `anchor build`). The frontend has its own copy of
   the IDL at [app/src/idl/my_project.ts](app/src/idl/my_project.ts) —
   keep them in sync after any program change.
-- The suite covers the happy paths (init, deposit, withdraw,
-  create/allocate/deallocate/rebalance/deactivate strategy) and a
-  block of error cases (unauthorized, zero amounts, insufficient
-  reserve, inactive strategy). Coverage of the spec's anti-theft /
-  introspection paths is **0%**, because those instructions don't
-  exist yet.
+- The suite covers happy paths (init, deposit, withdraw,
+  create/allocate/deallocate/rebalance/deactivate strategy) and an
+  extensive block of negative-path coverage in
+  [tests/security.ts](tests/security.ts) for `execute_action`
+  (anti-theft, recipient pin, sibling-ix introspection, cooldown,
+  loss cap, output-mint allow-list, etc.).
 
-## Things the spec says but the code does NOT do
+## What's still open after Phase-5
 
-[docs/SOLANA_VAULT_SPEC.md](docs/SOLANA_VAULT_SPEC.md) is the original build
-spec; it is partly aspirational. Verify before relying on it. The
-authoritative gap list is [docs/MISMATCHES.md](docs/MISMATCHES.md). Highlights
-that remain *open* after the Phase-3 refactor:
+[docs/SOLANA_VAULT_SPEC.md](docs/SOLANA_VAULT_SPEC.md) is the original
+spec. The authoritative gap list is
+[docs/MISMATCHES.md](docs/MISMATCHES.md); the followup queue is
+[docs/FOLLOWUPS.md](docs/FOLLOWUPS.md). Open program-side items:
 
-- **No instruction-sysvar introspection in `execute_action`** (audit
-  #7, deferred). Sibling-instruction attacks aren't caught — the
-  balance-snapshot anti-theft only sees the inner CPI.
-  [docs/MISMATCHES.md §2.3](docs/MISMATCHES.md).
-- **No auto-rebalance on deposit/withdraw.** Deposits sit in the
-  reserve; withdrawals revert when the reserve can't cover. Authority
-  must manually rebalance first. [docs/MISMATCHES.md §2.8](docs/MISMATCHES.md).
-- **`report_yield` is extra**, not in spec — the spec wants NAV
-  computed live from value-source CPIs. [docs/MISMATCHES.md §2.2](docs/MISMATCHES.md).
-- **Agent `src/` is empty.** [docs/MISMATCHES.md §4](docs/MISMATCHES.md).
-- **No `ValueSource` / `AutoActionConfig` accounts yet.** The
-  `AllowedAction` PDA is built; its sister registries are not.
+- **No read-only `compute_total_assets` view.** Write path is
+  `settle_strategy_value` — sufficient for indexer-side aggregation.
+  Add only if a consumer needs strict on-chain NAV without booking
+  a delta.
+- **`AutoActionConfig` is read off-chain only.** On-chain auto-CPI
+  inside `deposit` / `withdraw` is deferred (see
+  [docs/FOLLOWUPS.md C8](docs/FOLLOWUPS.md)).
+- **Real protocol adapters not yet shipped.** `mock_kamino` /
+  `mock_lulo` cover the agent flow end-to-end on devnet; mainnet
+  adapters for real Kamino / Lulo / Marginfi / Drift / Jupiter
+  remain.
 
-Closed by the Phase-3 refactor (see [docs/REFACTOR_PLAN.md](docs/REFACTOR_PLAN.md)):
+What got built between the original Phase-3 docs and now (consolidated
+view — see [docs/MISMATCHES.md §2](docs/MISMATCHES.md) for the full
+table):
 
-- ✅ **Per-strategy authority PDAs.** `vault_authority` and
-  `strategy_authority[i]` replace `vault_state` as CPI signers.
-  Cross-strategy drains structurally impossible.
-- ✅ **Virtual-shares offset.** `VIRTUAL_SHARES = 1_000_000` baked
-  into deposit/withdraw share math.
-- ✅ **Token-2022 hook rejection.** `initialize_vault` rejects mints
-  carrying `TransferHook` or `PermanentDelegate` extensions.
-- ✅ **Authority-only rebalance.** `rebalance_strategy` now requires
-  the authority signer.
-- ✅ **Weight-sum cap.** Sum of `target_weight_bps` across active
-  strategies is enforced ≤ 10 000 bps.
-- ✅ **Two-step admin/authority transfer.** `propose_admin` +
-  `accept_admin`; `propose_authority` + `accept_authority`. The
-  one-step `transfer_admin` / `set_authority` are removed.
-- ✅ **Pause coverage on deallocate + report_yield.**
-- ✅ **u128 share math + checked arithmetic everywhere.**
-- ✅ **`init_if_needed` admin ATA on withdraw** (no more "fee-flow
-  blocked because admin never opened an ATA").
-- ✅ **`report_loss` instruction** for booking realised losses.
-- ✅ **Required `expected_recipient_index` on `AllowedAction`.**
-- ✅ **`allowed_action.vault == vault_state.key()` constraint on
-  `execute_action`.**
+- ✅ Per-strategy authority PDAs; cross-strategy drains structurally
+  impossible.
+- ✅ Virtual-shares offset (`VIRTUAL_SHARES = 1_000_000`); u128 share
+  math + checked arithmetic.
+- ✅ Token-2022 `TransferHook` / `PermanentDelegate` rejection at vault init.
+- ✅ Two-step admin/authority transfer.
+- ✅ Phase-4a treasury fee split via `ProtocolConfig`.
+- ✅ Phase-4b auto-pull on withdraw (strategy ATAs cover the shortfall).
+- ✅ Phase-4d protocol-level `AllowedToken` allow-list.
+- ✅ Phase-5 `ValueSource` + `settle_strategy_value` (NAV from positions).
+- ✅ Phase-5 `AutoActionConfig` (off-chain-read declarative deploy intent).
+- ✅ Phase-5 `rebalance_with_delta` (signed-delta authority rebalance).
+- ✅ Phase-5 fan-out on deposit (weight-driven push from reserve).
+- ✅ Phase-5 sibling-instruction introspection on `execute_action`.
+- ✅ Phase-5 `loss_per_call_bps_cap` + `cooldown_secs` on `AllowedAction`.
+- ✅ Phase-5 `_reserved` cushions on all account types.
