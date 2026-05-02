@@ -5,6 +5,7 @@ use anchor_spl::token_interface::{self, Burn, Mint, TokenAccount, TokenInterface
 use crate::constants::*;
 use crate::errors::*;
 use crate::events::*;
+use crate::helpers::{read_spl_token_amount, try_load_program_pda};
 use crate::state::*;
 
 #[derive(Accounts)]
@@ -155,32 +156,13 @@ pub fn handler<'info>(
             let strategy_authority_ai = &chunk[1];
             let strategy_token_ai = &chunk[2];
 
-            // Each strategy account must be owned by this program.
-            if strategy_ai.owner != &program_id {
+            let Some(strategy) = try_load_program_pda::<StrategyAllocation>(strategy_ai)? else {
                 continue;
-            }
-
-            // Deserialize StrategyAllocation from raw account data after
-            // verifying the discriminator.
-            let strategy = {
-                let data = strategy_ai.try_borrow_data()?;
-                if data.len() < 8 + StrategyAllocation::INIT_SPACE {
-                    continue;
-                }
-                let mut disc = [0u8; 8];
-                disc.copy_from_slice(&data[..8]);
-                if disc != StrategyAllocation::DISCRIMINATOR {
-                    continue;
-                }
-                let mut slice: &[u8] = &data[8..];
-                StrategyAllocation::deserialize(&mut slice)
-                    .map_err(|_| error!(VaultError::InvalidMint))?
             };
-
-            require!(strategy.vault == vault_state_key, VaultError::InvalidMint);
+            require!(strategy.vault == vault_state_key, VaultError::AccountMismatch);
             require!(
                 strategy.token_account == strategy_token_ai.key(),
-                VaultError::InvalidMint
+                VaultError::AccountMismatch
             );
 
             // Re-derive strategy_authority from stored bump and check it
@@ -194,23 +176,13 @@ pub fn handler<'info>(
                 auth_bump_arr.as_ref(),
             ];
             let expected_auth = Pubkey::create_program_address(auth_seeds, &program_id)
-                .map_err(|_| error!(VaultError::InvalidMint))?;
+                .map_err(|_| error!(VaultError::AccountMismatch))?;
             require!(
                 strategy_authority_ai.key() == expected_auth,
-                VaultError::InvalidMint
+                VaultError::AccountMismatch
             );
 
-            // Read strategy ATA balance from raw bytes (offset 64..72 in
-            // both classic SPL Token and Token-2022 layouts).
-            let strategy_token_balance = {
-                let data = strategy_token_ai.try_borrow_data()?;
-                if data.len() < 72 {
-                    continue;
-                }
-                let mut amount_bytes = [0u8; 8];
-                amount_bytes.copy_from_slice(&data[64..72]);
-                u64::from_le_bytes(amount_bytes)
-            };
+            let strategy_token_balance = read_spl_token_amount(strategy_token_ai)?;
             let pull = std::cmp::min(strategy_token_balance, shortfall);
             if pull == 0 {
                 continue;
@@ -243,7 +215,7 @@ pub fn handler<'info>(
                 let mut writer: &mut [u8] = &mut data[8..];
                 updated
                     .serialize(&mut writer)
-                    .map_err(|_| error!(VaultError::MathOverflow))?;
+                    .map_err(|_| error!(VaultError::AccountMismatch))?;
             }
 
             emit!(StrategyDeallocated {

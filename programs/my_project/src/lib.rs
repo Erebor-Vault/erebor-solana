@@ -22,7 +22,7 @@ pub use events::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z");
+declare_id!("FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo");
 
 #[program]
 pub mod my_project {
@@ -36,7 +36,10 @@ pub mod my_project {
         instructions::initialize_vault::handler(ctx, vault_id)
     }
 
-    pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+    pub fn deposit<'info>(
+        ctx: Context<'_, '_, '_, 'info, Deposit<'info>>,
+        amount: u64,
+    ) -> Result<()> {
         instructions::deposit::handler(ctx, amount)
     }
 
@@ -161,6 +164,14 @@ pub mod my_project {
         instructions::rebalance_strategy::handler(ctx)
     }
 
+    /// Phase-5: explicit signed-delta rebalance. Authority-only. Pushes
+    /// `delta` if positive (reserve → strategy) and pulls if negative
+    /// (strategy → reserve). Reverts on overflow / under-flow / when the
+    /// reserve can't cover a positive delta.
+    pub fn rebalance_with_delta(ctx: Context<RebalanceWithDelta>, delta: i64) -> Result<()> {
+        instructions::rebalance_with_delta::handler(ctx, delta)
+    }
+
     // ============================================================
     // ALLOWED-ACTION WHITELIST + EXECUTE_ACTION
     // ============================================================
@@ -172,6 +183,8 @@ pub mod my_project {
         discriminator: [u8; 8],
         expected_recipient_index: u16,
         output_mint_index: Option<u16>,
+        loss_per_call_bps_cap: u16,
+        cooldown_secs: u32,
     ) -> Result<()> {
         instructions::add_allowed_action::handler(
             ctx,
@@ -180,6 +193,8 @@ pub mod my_project {
             discriminator,
             expected_recipient_index,
             output_mint_index,
+            loss_per_call_bps_cap,
+            cooldown_secs,
         )
     }
 
@@ -206,5 +221,94 @@ pub mod my_project {
             discriminator,
             ix_data,
         )
+    }
+
+    // ============================================================
+    // AUTO-ACTION CONFIG (Phase-5 — declarative deploy/redeem intent)
+    // ============================================================
+
+    /// Admin-only. Records the curator's intended `(target, disc, ix_data)`
+    /// for what this strategy should do when funds enter (kind=0) or
+    /// leave (kind=1). Read off-chain by the agent; on-chain auto-CPI
+    /// invocation is a future phase.
+    pub fn set_auto_action_config(
+        ctx: Context<SetAutoActionConfig>,
+        strategy_id: u64,
+        kind: u8,
+        target_program: Pubkey,
+        discriminator: [u8; 8],
+        ix_data: Vec<u8>,
+    ) -> Result<()> {
+        instructions::set_auto_action_config::handler(
+            ctx,
+            strategy_id,
+            kind,
+            target_program,
+            discriminator,
+            ix_data,
+        )
+    }
+
+    /// Admin-only. Closes the AutoActionConfig PDA, returning rent to the
+    /// admin. Call before re-issuing `set_auto_action_config` for the
+    /// same `(strategy, kind)` to update the recorded intent.
+    pub fn clear_auto_action_config(
+        ctx: Context<ClearAutoActionConfig>,
+        strategy_id: u64,
+        kind: u8,
+    ) -> Result<()> {
+        instructions::clear_auto_action_config::handler(ctx, strategy_id, kind)
+    }
+
+    // ============================================================
+    // VALUE SOURCES + LIVE NAV SETTLE (Phase-5)
+    // ============================================================
+
+    /// Admin-only. Registers a `ValueSource` slot for a strategy. `kind`
+    /// 0 = SplAtaBalance (read u64 at offset 64..72 of `target_account`);
+    /// 1 = AccountU64 (read u64 at `offset..offset+8`). The raw read is
+    /// scaled by `scale_num/scale_den` to convert into underlying-token
+    /// units (e.g. cToken → underlying via the protocol's exchange rate).
+    pub fn add_value_source(
+        ctx: Context<AddValueSource>,
+        strategy_id: u64,
+        index: u8,
+        kind: u8,
+        target_account: Pubkey,
+        offset: u32,
+        scale_num: u64,
+        scale_den: u64,
+    ) -> Result<()> {
+        instructions::add_value_source::handler(
+            ctx,
+            strategy_id,
+            index,
+            kind,
+            target_account,
+            offset,
+            scale_num,
+            scale_den,
+        )
+    }
+
+    /// Admin-only. Closes a `ValueSource` PDA, returning rent.
+    pub fn remove_value_source(
+        ctx: Context<RemoveValueSource>,
+        strategy_id: u64,
+        index: u8,
+    ) -> Result<()> {
+        instructions::remove_value_source::handler(ctx, strategy_id, index)
+    }
+
+    /// Authority-only. Computes a strategy's live total (idle ATA balance
+    /// plus the sum of registered ValueSources, scaled into underlying
+    /// units) and settles `strategy.allocated_amount` + `vault.total_deposited`
+    /// to match. Pause-gated. Caller passes
+    /// `[value_source_pda, target_account]` pairs in `remaining_accounts`.
+    pub fn settle_strategy_value<'info>(
+        ctx: Context<'_, '_, '_, 'info, SettleStrategyValue<'info>>,
+        strategy_id: u64,
+    ) -> Result<()> {
+        instructions::settle_strategy_value::handler(ctx, strategy_id)
     }
 }

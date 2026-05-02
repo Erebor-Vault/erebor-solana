@@ -15,7 +15,7 @@
 // position) — the strategy ATA is at index 0 in both cases.
 
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, Connection, SystemProgram } from "@solana/web3.js";
+import { PublicKey, Connection, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import BN from "bn.js";
 import { createHash } from "crypto";
@@ -187,6 +187,7 @@ export class OnChainLuloProtocol implements LuloProtocol {
             targetProgramAccount: this.luloProgramId,
             // output_mint_index is None for lulo, so this is a placeholder.
             allowedOutputToken: SystemProgram.programId,
+            instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
           })
           .remainingAccounts(remainingAccounts)
           .signers([this.config.agentKeypair])

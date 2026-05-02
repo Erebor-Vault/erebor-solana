@@ -1,6 +1,6 @@
 /**
  * Mock-Lulo redeem adapter. Targets the in-repo `mock_lulo` program deployed
- * on devnet at `3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm`.
+ * on devnet at `DUECqnJ77fP2Kd9SqeTsVc9n7MiTaBvSW3mREM8DuBVs`.
  *
  * mock_lulo is a single-asset lending mock: deposits go into a per-mint
  * treasury and a per-strategy ProtocolPosition tracks the deposited
@@ -19,6 +19,7 @@
 import {
   PublicKey,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   TransactionInstruction,
   AccountMeta,
 } from "@solana/web3.js";
@@ -28,7 +29,7 @@ import { sha256 } from "@noble/hashes/sha2";
 import type { RedeemAdapter, ProtocolPosition } from "./types";
 
 export const MOCK_LULO_PROGRAM_ID = new PublicKey(
-  "3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm",
+  "DUECqnJ77fP2Kd9SqeTsVc9n7MiTaBvSW3mREM8DuBVs",
 );
 
 /** Anchor discriminator: sha256("global:withdraw")[..8]. */
@@ -152,6 +153,7 @@ export const mockLuloAdapter: RedeemAdapter = {
         // on the AllowedAction is None. SystemProgram is the standard
         // placeholder per the IDL doc.
         allowedOutputToken: SystemProgram.programId,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .remainingAccounts(remainingAccounts)
       .instruction();

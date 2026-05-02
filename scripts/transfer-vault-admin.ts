@@ -15,9 +15,9 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import * as fs from "fs";
 import BN from "bn.js";
 
-const TOKEN_MINT = new PublicKey("5BTPntEhZXMK4FTjJe3VqJM1qZZr58ANpWfJQThPRb6N");
+const TOKEN_MINT = new PublicKey("7MNPXdG3oEWFdJNGPuQMDVZzGNXts1zhCLejD49Lp3hE");
 const VAULT_ID = 4; // DeFi Alpha
-const TARGET_WALLET = new PublicKey("8qKtKHeN8hMRLGPXQgBF84CkwC8UPjks4CLuCtLNF2qv");
+const TARGET_WALLET = new PublicKey("DhCAaTtz8A23d41NnUzaYgY79fxmRbzXnYAHiieYHike");
 const RPC_URL = "https://api.devnet.solana.com";
 const WALLET_PATH = "./id.json";
 

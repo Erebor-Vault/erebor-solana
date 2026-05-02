@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 export const PROGRAM_ID = new PublicKey(
-  "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
+  "FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo"
 );
 
 export const CLUSTERS = {
@@ -47,11 +47,12 @@ export interface VaultEntry {
   vaultId: number;
 }
 
-// Path-B port test mint (created by setup-lulo-strategy.ts on the
-// 2026-04-30 redeploy). Pre-refactor mints (HgctyjCk…, J1qLR4P2…,
-// BZwn5e9G…, 45AbULTJ…, 5BTPntEhZ…) are orphaned — see docs/DEPLOYMENT.md.
+// Round-7 test mint (created by setup-multi-vaults.ts on 2026-05-02 after
+// closing + redeploying the 3 programs under fresh keypairs). Pre-redeploy
+// mints (GhE6BWCz…, HEYo4Z5K…, HgctyjCk…, J1qLR4P2…, BZwn5e9G…, 45AbULTJ…,
+// 5BTPntEhZ…) are orphaned — see docs/DEPLOYMENT.md.
 const TEST_USDC_MINT = new PublicKey(
-  "HEYo4Z5KDtfLFGW51xoQW3MFFEGLdfgkQRrpX2Dm4Chi"
+  "7MNPXdG3oEWFdJNGPuQMDVZzGNXts1zhCLejD49Lp3hE"
 );
 
 export const VAULT_REGISTRY: VaultEntry[] = [

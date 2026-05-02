@@ -253,6 +253,8 @@ export function useAdminActions() {
       discriminator: number[],
       expectedRecipientIndex: number,
       outputMintIndex: number | null,
+      lossPerCallBpsCap: number = 0,
+      cooldownSecs: number = 0,
     ): Promise<string> => {
       if (!program || !wallet.publicKey) throw new Error("Not ready");
       if (discriminator.length !== 8) throw new Error("Discriminator must be 8 bytes");
@@ -264,6 +266,12 @@ export function useAdminActions() {
         (!Number.isInteger(outputMintIndex) || outputMintIndex < 0)
       ) {
         throw new Error("outputMintIndex must be null or a non-negative integer");
+      }
+      if (!Number.isInteger(lossPerCallBpsCap) || lossPerCallBpsCap < 0 || lossPerCallBpsCap > 5_000) {
+        throw new Error("lossPerCallBpsCap must be in [0, 5000]");
+      }
+      if (!Number.isInteger(cooldownSecs) || cooldownSecs < 0) {
+        throw new Error("cooldownSecs must be a non-negative integer");
       }
 
       setLoading(true);
@@ -278,6 +286,8 @@ export function useAdminActions() {
             discriminator,
             expectedRecipientIndex,
             outputMintIndex,
+            lossPerCallBpsCap,
+            cooldownSecs,
           )
           .accountsStrict({
             admin: wallet.publicKey,

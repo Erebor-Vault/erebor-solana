@@ -13,6 +13,7 @@ import { WeightEditor } from "@/components/admin/strategy/WeightEditor";
 import { AuthorityActionsPanel } from "@/components/admin/strategy/AuthorityActionsPanel";
 import { DeactivateStrategyButton } from "@/components/admin/strategy/DeactivateStrategyButton";
 import { AllowedActionsEditor } from "@/components/admin/strategy/AllowedActionsEditor";
+import { VaultAllowedActionsProvider } from "@/hooks/useAllowedActions";
 import { ReportLossButton } from "@/components/admin/strategy/ReportLossButton";
 import { RedeemFromExternalButton } from "@/components/admin/strategy/RedeemFromExternalButton";
 import { AutoActionConfigEditor } from "@/components/admin/strategy/AutoActionConfigEditor";
@@ -22,7 +23,9 @@ import { truncateAddress } from "@/lib/format";
 export function StrategyAdminContent() {
   return (
     <AdminGuard>
-      <Inner />
+      <VaultAllowedActionsProvider>
+        <Inner />
+      </VaultAllowedActionsProvider>
     </AdminGuard>
   );
 }

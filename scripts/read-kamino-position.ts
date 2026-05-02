@@ -38,11 +38,11 @@ function readProgramId(idlPath: string, fallback: string): PublicKey {
 
 const VAULT_PROGRAM_ID = readProgramId(
   "./target/idl/my_project.json",
-  "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z"
+  "FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo"
 );
 const KAMINO_PROGRAM_ID = readProgramId(
   "./target/idl/mock_kamino.json",
-  "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK"
+  "H4tUCeXMQduSmB6fjqbYMdFb49E8YnEHku5NWFrWKaGU"
 );
 
 // =============================================================================

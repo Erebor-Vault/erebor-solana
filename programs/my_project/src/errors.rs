@@ -97,4 +97,49 @@ pub enum VaultError {
 
     #[msg("Output mint index is out of range of remaining_accounts")]
     OutputMintIndexOutOfRange,
+
+    #[msg("Allowed-action cooldown has not elapsed")]
+    ActionCooldownActive,
+
+    #[msg("Loss booked by execute_action exceeds the per-action cap")]
+    ActionLossExceedsCap,
+
+    #[msg("Per-action loss cap exceeds protocol maximum")]
+    LossCapTooHigh,
+
+    #[msg("Sibling instruction in this transaction is forbidden by introspection guard")]
+    SiblingInstructionForbidden,
+
+    #[msg("Signed delta would push allocated_amount negative or overflow")]
+    DeltaOutOfRange,
+
+    #[msg("AutoActionConfig kind must be 0 (Deposit) or 1 (Withdraw)")]
+    InvalidAutoActionKind,
+
+    #[msg("AutoActionConfig ix_data exceeds the 256-byte cap")]
+    AutoActionDataTooLarge,
+
+    #[msg("ValueSource kind must be 0 (SplAtaBalance) or 1 (AccountU64)")]
+    InvalidValueSourceKind,
+
+    #[msg("ValueSource index exceeds MAX_VALUE_SOURCES_PER_STRATEGY")]
+    ValueSourceIndexOutOfBounds,
+
+    #[msg("ValueSource scale_den must be non-zero")]
+    InvalidValueSourceScale,
+
+    #[msg("ValueSource target account passed in remaining_accounts does not match the registered target")]
+    ValueSourceTargetMismatch,
+
+    #[msg("ValueSource target account data is shorter than required offset+8")]
+    ValueSourceTargetTooSmall,
+
+    #[msg("Account passed in remaining_accounts does not match the expected key/owner/layout")]
+    AccountMismatch,
+
+    #[msg("ValueSource target_account must not equal the strategy's own ATA (would double-count)")]
+    ValueSourceTargetIsStrategyAta,
+
+    #[msg("Cumulative fan-out from a single deposit cannot exceed the deposit amount")]
+    FanOutExceedsDeposit,
 }

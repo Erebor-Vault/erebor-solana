@@ -81,6 +81,7 @@ pub fn handler(ctx: Context<CreateStrategy>) -> Result<()> {
     strategy.target_weight_bps = 0;
     strategy.bump = ctx.bumps.strategy;
     strategy.authority_bump = ctx.bumps.strategy_authority;
+    strategy._reserved = [0; 32];
 
     // Approve delegate, signed by strategy_authority (the new ATA owner).
     let vault_state_key = ctx.accounts.vault_state.key();

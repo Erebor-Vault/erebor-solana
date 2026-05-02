@@ -15,6 +15,7 @@ import { Program } from "@coral-xyz/anchor";
 import {
   PublicKey,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   TransactionSignature,
   Keypair,
 } from "@solana/web3.js";
@@ -130,6 +131,7 @@ async function executeKaminoAction(
       // doesn't read this account. Pass any program-owned account as a
       // placeholder per the Anchor IDL's allowance.
       allowedOutputToken: SystemProgram.programId,
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(remainingAccounts)
     .signers([ctx.agentKeypair])

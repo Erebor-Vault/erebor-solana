@@ -2,11 +2,16 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
     instruction::{AccountMeta, Instruction},
     program::invoke_signed,
+    sysvar::instructions::{
+        load_current_index_checked, load_instruction_at_checked, ID as INSTRUCTIONS_SYSVAR_ID,
+    },
 };
 use anchor_spl::token_interface::TokenAccount;
 
+use crate::constants::*;
 use crate::errors::*;
 use crate::events::*;
+use crate::helpers::read_spl_token_amount;
 use crate::state::*;
 
 #[derive(Accounts)]
@@ -36,6 +41,7 @@ pub struct ExecuteAction<'info> {
     pub strategy_authority: UncheckedAccount<'info>,
 
     #[account(
+        mut,
         seeds = [
             b"allowed_action",
             strategy.key().as_ref(),
@@ -75,6 +81,12 @@ pub struct ExecuteAction<'info> {
     /// owned by this program. When `None`, the account is unused. Caller
     /// passes any account (e.g. SystemProgram::id) as a placeholder.
     pub allowed_output_token: AccountInfo<'info>,
+
+    /// CHECK: instructions sysvar — used by Phase-5 sibling-instruction
+    /// introspection to ensure no other instruction in the same
+    /// transaction touches the strategy ATA.
+    #[account(address = INSTRUCTIONS_SYSVAR_ID @ VaultError::SiblingInstructionForbidden)]
+    pub instructions_sysvar: AccountInfo<'info>,
 }
 
 pub fn handler<'info>(
@@ -84,6 +96,43 @@ pub fn handler<'info>(
     discriminator: [u8; 8],
     ix_data: Vec<u8>,
 ) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+
+    // 0. Cooldown gate — rate-limit a compromised agent.
+    let allowed_for_cooldown = &ctx.accounts.allowed_action;
+    if allowed_for_cooldown.cooldown_secs > 0 {
+        let elapsed = now.saturating_sub(allowed_for_cooldown.last_executed_at);
+        require!(
+            elapsed >= allowed_for_cooldown.cooldown_secs as i64,
+            VaultError::ActionCooldownActive
+        );
+    }
+
+    // 0b. Sibling-instruction introspection (audit #7). Reject any other
+    // instruction in this transaction that touches the strategy ATA at
+    // any meta slot — covers the "sibling Token::transfer signed by the
+    // delegate against the strategy ATA" smuggle.
+    {
+        let ix_sysvar_ai = &ctx.accounts.instructions_sysvar;
+        let current_idx = load_current_index_checked(ix_sysvar_ai)? as usize;
+        let strategy_ata_key = ctx.accounts.strategy.token_account;
+        for i in 0..MAX_INSTRUCTIONS_PER_TX {
+            let probed_ix = match load_instruction_at_checked(i, ix_sysvar_ai) {
+                Ok(ix) => ix,
+                Err(_) => break,
+            };
+            if i == current_idx {
+                continue;
+            }
+            for meta in &probed_ix.accounts {
+                require!(
+                    meta.pubkey != strategy_ata_key,
+                    VaultError::SiblingInstructionForbidden
+                );
+            }
+        }
+    }
+
     // 1. Caller is delegate or authority.
     let caller = ctx.accounts.caller.key();
     let is_delegate = caller == ctx.accounts.strategy.delegate;
@@ -145,9 +194,12 @@ pub fn handler<'info>(
         );
     }
 
-    // 5. Snapshot both caller's and delegate's ATAs (audit #30 revised).
+    // 5. Snapshot both caller's and delegate's ATAs (audit #30 revised),
+    // plus the strategy ATA for the per-action loss cap.
     let caller_before = ctx.accounts.caller_token_ata.amount;
     let delegate_before = ctx.accounts.delegate_token_ata.amount;
+    let strategy_ata_before = read_spl_token_amount(&ctx.remaining_accounts[recipient_idx])?;
+    let strategy_allocated_at_call = ctx.accounts.strategy.allocated_amount;
 
     // 6. Build inner ix; mark the strategy_authority PDA as a signer in
     //    the metas so the protocol sees a valid authority on the
@@ -199,6 +251,27 @@ pub fn handler<'info>(
         ctx.accounts.delegate_token_ata.amount <= delegate_before,
         VaultError::AntiTheft
     );
+
+    // 7b. Per-action loss cap. Cap is denominated in basis points of the
+    // strategy's allocated_amount at call time. The check is over the
+    // strategy ATA outflow during this call: if the ATA balance shrank
+    // by more than the cap, revert. `cap == 0` disables.
+    let cap_bps = ctx.accounts.allowed_action.loss_per_call_bps_cap;
+    if cap_bps > 0 {
+        let strategy_ata_after = read_spl_token_amount(&ctx.remaining_accounts[recipient_idx])?;
+        let outflow = strategy_ata_before.saturating_sub(strategy_ata_after);
+        let cap_amount: u64 = (strategy_allocated_at_call as u128)
+            .checked_mul(cap_bps as u128)
+            .ok_or(VaultError::MathOverflow)?
+            .checked_div(10_000)
+            .ok_or(VaultError::MathOverflow)?
+            .try_into()
+            .map_err(|_| error!(VaultError::MathOverflow))?;
+        require!(outflow <= cap_amount, VaultError::ActionLossExceedsCap);
+    }
+
+    // 7c. Stamp the cooldown clock so the next call respects `cooldown_secs`.
+    ctx.accounts.allowed_action.last_executed_at = now;
 
     emit!(ActionExecuted {
         vault: ctx.accounts.vault_state.key(),

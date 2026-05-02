@@ -367,7 +367,9 @@ async function main() {
         kaminoProgram.programId,
         Array.from(disc) as any,
         action.recipientIndex,
-        null
+        null,
+        0,
+        0
       )
       .accountsStrict({
         admin: payer.publicKey,

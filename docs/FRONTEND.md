@@ -14,7 +14,7 @@
 ## 1. What the frontend is
 
 A multi-vault, role-aware dashboard for the `my_project` Anchor
-program at id `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B`. Three
+program at id `B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z`. Three
 audiences, one app:
 
 | Audience      | What they do                                                                                                |
@@ -24,9 +24,12 @@ audiences, one app:
 | **Authority** | Manual `allocate_to_strategy` / `deallocate_from_strategy` / `rebalance_strategy` / `report_yield`          |
 
 Every vault is qualified by `(token_mint, vault_id)` — the same id on
-two mints is a different vault. The active vault is held in the
-`VaultProvider` context; routes do not yet encode it in the URL
-(`/vault/[chainId]/[address]` from the spec is a roadmap item).
+two mints is a different vault. The active vault is encoded in the
+URL as `/vault/[address]` (where `[address]` is the vault PDA), with
+nested admin routes at `/vault/[address]/admin` and per-strategy
+admin views at `/vault/[address]/admin/strategy/[id]`. The same
+`VaultProvider` context still holds the active vault but is now
+hydrated from URL params.
 
 ---
 
@@ -66,18 +69,29 @@ app/
   src/
     app/
       layout.tsx                                 # SolanaProvider + VaultProvider + Navbar + Toaster
-      page.tsx                                   # multi-vault dashboard (vault list + stats + deposit/withdraw + pie + position)
+      page.tsx                                   # multi-vault landing (vault list + aggregate stats)
       globals.css                                # Tailwind base + dark CSS vars
-      admin/
-        page.tsx                                 # admin/authority panel (create + rebalance-all + per-strategy cards)
+      vault/
+        [address]/
+          page.tsx                               # per-vault dashboard (stats + deposit/withdraw + pie + position + activity feed)
+          admin/
+            page.tsx                             # admin/authority panel (create + rebalance-all + per-strategy cards + pause + fee + allowed tokens)
+            strategy/
+              [id]/
+                page.tsx                         # per-strategy admin view (allowed actions + delegate + deactivate)
 
     components/
       admin/
-        AdminGuard.tsx                           # role gate wrapper (all-or-nothing) for /admin
+        AdminGuard.tsx                           # role gate wrapper for /vault/[address]/admin
+        AdminTransferFlow.tsx                    # two-step propose_admin / accept_admin flow (and authority equivalents)
         AllocationChart.tsx                      # Recharts donut over reserve + active strategies
+        AllowedTokensPanel.tsx                   # protocol-level AllowedToken PDA management
         CreateStrategyForm.tsx                   # createStrategy(delegate) + checklist UI
+        PauseToggle.tsx                          # admin-only set_paused flip
+        PerformanceFeeEditor.tsx                 # set_performance_fee_bps within [0, MAX_PERFORMANCE_FEE_BPS]
         StrategyCard.tsx                         # per-strategy card: weight + delegate rotate + deactivate + manual allocate/deallocate
         StrategyList.tsx                         # admin index of strategies
+        strategy/                                # per-strategy admin sub-components (allowed-action editor etc.)
       layout/
         Navbar.tsx                               # brand + VaultSelector + WalletMultiButton + admin link (when admin/authority)
         VaultSelector.tsx                        # popover dropdown of all entries in VAULT_REGISTRY
@@ -88,9 +102,13 @@ app/
         AmountInput.tsx                          # token amount input (+ Max button)
         TxToast.tsx                              # success / error toast helpers
       vault/
+        ActivityFeed.tsx                         # decoded #[event] log feed (BorshEventCoder)
+        AggregateStats.tsx                       # cross-vault TVL/share-count aggregates on /
         DepositForm.tsx                          # deposit(amount) flow
-        WithdrawForm.tsx                         # withdraw(shares_to_burn) flow
+        WithdrawForm.tsx                         # withdraw(shares_to_burn) flow with fee preview
         UserPosition.tsx                         # user share balance + estimated underlying value
+        PausedBanner.tsx                         # destructive banner when vault_state.paused
+        PendingRoleBanner.tsx                    # banner when this wallet is pending_admin or pending_authority
         VaultList.tsx                            # registry list (clickable rows)
         VaultStats.tsx                           # asset symbol + TVL + share price
 
@@ -100,8 +118,12 @@ app/
       useWithdraw.ts                             # withdraw(shares_to_burn)
       useStrategies.ts                           # fetch every StrategyAllocation account for the active vault
       useUserPosition.ts                         # user share + token balances; refresh interval
-      useAdminActions.ts                         # createStrategy / deactivateStrategy / updateDelegate / setStrategyWeight
-      useAuthorityActions.ts                     # allocate / deallocate / reportYield / rebalanceStrategy / rebalanceAll
+      useRoles.ts                                # admin / authority / pending_admin / pending_authority booleans for connected wallet
+      useAdminActions.ts                         # createStrategy / deactivateStrategy / updateDelegate / setStrategyWeight / propose+accept admin/authority / setPaused / setPerformanceFeeBps
+      useAuthorityActions.ts                     # allocate / deallocate / reportYield / reportLoss / rebalanceStrategy / rebalanceAll
+      useAllowedActions.ts                       # add / remove AllowedAction PDAs for a strategy
+      useAllowedTokens.ts                        # add / remove AllowedToken PDAs (protocol-level)
+      useProtocolConfig.ts                       # initialize / read ProtocolConfig singleton
 
     lib/
       constants.ts                               # PROGRAM_ID, CLUSTERS, getCluster/getRpcUrl/getTokenMint, VAULT_REGISTRY, getExplorerUrl
@@ -122,46 +144,54 @@ app/
 
 ## 4. Routes
 
-### `/` — multi-vault dashboard
+URL-encoded vault selection via `[address]` (the vault PDA, base58)
+is shipped. Static params for every entry in `VAULT_REGISTRY` are
+generated at build time via `generateStaticParams`.
 
-[`DashboardPage`](app/src/app/page.tsx) renders:
+### `/` — multi-vault landing
+
+[`page.tsx`](app/src/app/page.tsx) renders:
 
 1. **`VaultList`** — clickable rows for every entry in
-   `VAULT_REGISTRY`. Selecting a row updates the
-   `VaultProvider` active vault.
-2. **Active vault header** — name + token symbol pill.
-3. **`VaultStats`** — asset symbol, TVL (= `total_deposited`), share
+   `VAULT_REGISTRY`. Selecting a row navigates to
+   `/vault/[address]`.
+2. **`AggregateStats`** — cross-vault TVL / share-count aggregates.
+
+### `/vault/[address]` — per-vault user dashboard
+
+[`/vault/[address]/page.tsx`](app/src/app/vault/[address]/page.tsx)
+renders:
+
+1. **Vault header** — name + token symbol pill + paused banner if
+   `vault_state.paused`.
+2. **`VaultStats`** — asset symbol, TVL (= `total_deposited`), share
    price (computed via [format.ts:formatSharePrice](app/src/lib/format.ts)),
    strategy count.
-4. **Two-column grid** (`lg:grid-cols-2`): left = a deposit/withdraw
+3. **Two-column grid** (`lg:grid-cols-2`): left = a deposit/withdraw
    tab toggle wrapping `DepositForm` / `WithdrawForm`; right =
    `UserPosition`.
-5. **`AllocationChart`** — Recharts donut, full-width below the grid.
+4. **`AllocationChart`** — Recharts donut, full-width below the grid.
+5. **`ActivityFeed`** — decoded `#[event]` log stream for the active
+   vault.
 
-The dashboard does *not* have an activity feed — blocked on the
-program emitting `#[event]` records. See
-[MISMATCHES.md §2.5](MISMATCHES.md).
+### `/vault/[address]/admin` — admin/authority surface
 
-### `/admin` — admin/authority surface
-
-[`/admin/page.tsx`](app/src/app/admin/page.tsx) wraps everything in
-[`AdminGuard`](app/src/components/admin/AdminGuard.tsx), which:
-
-- Returns the children unchanged if `publicKey` matches `vault.admin`
-  or `vault.authority`.
-- Renders a "Not authorized" banner otherwise.
-
+[`/vault/[address]/admin/page.tsx`](app/src/app/vault/[address]/admin/page.tsx)
+wraps everything in [`AdminGuard`](app/src/components/admin/AdminGuard.tsx).
 Inside the guard:
 
 - [`CreateStrategyForm`](app/src/components/admin/CreateStrategyForm.tsx) — paste a delegate pubkey + an anti-theft checklist (UI only) → call `createStrategy(delegate)`.
+- [`PauseToggle`](app/src/components/admin/PauseToggle.tsx) — admin-only `set_paused` switch.
+- [`PerformanceFeeEditor`](app/src/components/admin/PerformanceFeeEditor.tsx) — `set_performance_fee_bps` within `[0, MAX_PERFORMANCE_FEE_BPS]`.
+- [`AdminTransferFlow`](app/src/components/admin/AdminTransferFlow.tsx) — two-step `propose_admin` / `accept_admin` (and authority equivalents).
+- [`AllowedTokensPanel`](app/src/components/admin/AllowedTokensPanel.tsx) — protocol-level `AllowedToken` PDA add / remove.
 - A "Rebalance all" button → loops over active strategies and calls `rebalanceStrategy` for each.
 - [`StrategyList`](app/src/components/admin/StrategyList.tsx) — grid of [`StrategyCard`](app/src/components/admin/StrategyCard.tsx) entries, each exposing per-strategy weight, delegate rotation, deactivation, and manual allocate / deallocate.
 
-There is **no** spec-style `/vault/[chainId]/[address]` per-vault
-route, no per-strategy `/vault/.../strategy/[id]` route, no
-`/vault/.../admin/strategy/[id]` route. Everything is
-context-driven by `VaultProvider`. Adding URL-encoded vault selection
-is a roadmap item ([FRONTEND_PLAN.md](FRONTEND_PLAN.md)).
+### `/vault/[address]/admin/strategy/[id]` — per-strategy admin
+
+Drill-down from a `StrategyCard`: per-strategy `AllowedAction`
+add/remove, delegate rotation, weight, deactivate.
 
 ---
 
@@ -192,18 +222,24 @@ export const VAULT_REGISTRY: VaultEntry[] = [
 ```
 
 (`USDC` is the devnet test mint
-`45AbULTJqK9dpDNDQMb3fe9ojPwc53gr7uUsqHNwkDUY`.)
+`HEYo4Z5KDtfLFGW51xoQW3MFFEGLdfgkQRrpX2Dm4Chi` — see [DEPLOYMENT.md](DEPLOYMENT.md)
+for the prior orphaned mints.)
 
 PDAs derive in [`app/src/lib/pda.ts`](app/src/lib/pda.ts):
 
-| Helper                                    | Seeds                                                                |
-| ----------------------------------------- | -------------------------------------------------------------------- |
-| `deriveVaultPda(token_mint, vault_id)`    | `["vault", token_mint, &vault_id.to_le_bytes()]`                     |
-| `deriveShareMintPda(vault_state)`         | `["shares", vault_state]`                                            |
-| `deriveStrategyPda(vault_state, id)`      | `["strategy", vault_state, &id.to_le_bytes()]`                       |
-| `deriveStrategyTokenPda(vault_state, id)` | `["strategy_token", vault_state, &id.to_le_bytes()]`                 |
-| `deriveReserveAta(vault_state, mint)`     | `getAssociatedTokenAddressSync(mint, vault_state, /* allowOwnerOffCurve */ true)` |
-| `deriveUserAta(mint, owner)`              | `getAssociatedTokenAddressSync(mint, owner)`                         |
+| Helper                                          | Seeds                                                                |
+| ----------------------------------------------- | -------------------------------------------------------------------- |
+| `deriveVaultPda(token_mint, vault_id)`          | `["vault", token_mint, &vault_id.to_le_bytes()]`                     |
+| `deriveVaultAuthorityPda(vault_state)`          | `["vault_authority", vault_state]`                                   |
+| `deriveStrategyAuthorityPda(vault_state, id)`   | `["strategy_authority", vault_state, &id.to_le_bytes()]`             |
+| `deriveShareMintPda(vault_state)`               | `["shares", vault_state]`                                            |
+| `deriveStrategyPda(vault_state, id)`            | `["strategy", vault_state, &id.to_le_bytes()]`                       |
+| `deriveStrategyTokenPda(vault_state, id)`       | `["strategy_token", vault_state, &id.to_le_bytes()]`                 |
+| `deriveReserveAta(vault_authority, mint)`       | `getAssociatedTokenAddressSync(mint, vault_authority, /* allowOwnerOffCurve */ true)` (reserve ATA owner is `vault_authority`) |
+| `deriveAllowedActionPda(strategy, target, disc)`| `["allowed_action", strategy, target_program, discriminator]`        |
+| `deriveAllowedTokenPda(mint)`                   | `["allowed_token", mint]`                                            |
+| `deriveProtocolConfigPda()`                     | `["protocol_config"]`                                                |
+| `deriveUserAta(mint, owner)`                    | `getAssociatedTokenAddressSync(mint, owner)`                         |
 
 There is **no** `AddCustomVaultDialog` today — adding a vault means
 editing the registry. See [FRONTEND_PLAN.md](FRONTEND_PLAN.md) for the
@@ -254,8 +290,8 @@ Caveats:
    [`AmountInput`](app/src/components/shared/AmountInput.tsx) fills
    the wallet token balance.
 3. `program.methods.deposit(amount).accountsStrict({…}).rpc()` builds
-   and sends. The vault PDA signs the `mint_to`; the user signs the
-   token transfer in.
+   and sends. `vault_authority` signs the `mint_to`; the user signs
+   the token transfer in.
 4. On success, surface a toast and refetch
    [`useUserPosition`](app/src/hooks/useUserPosition.ts) +
    [`useStrategies`](app/src/hooks/useStrategies.ts).
@@ -319,9 +355,9 @@ but it's `disabled`).
 
 ✅ Shipped in [StrategyList.tsx](app/src/components/admin/StrategyList.tsx).
 Running progress bar above the cards shows the sum of `target_weight_bps`
-across active strategies. Warns when over-allocated (the program does
-not enforce the sum cap — see [MISMATCHES.md §2.2](MISMATCHES.md));
-shows the reserve buffer % when under-allocated.
+across active strategies (the program enforces the cap as well via
+`vault_state.total_active_weight_bps`, reverting with
+`WeightSumExceedsMax`); shows the reserve buffer % when under-allocated.
 
 ---
 
@@ -342,9 +378,10 @@ only, not enforced on-chain.
 exposes:
 
 - **Weight slider** — `setStrategyWeight(weight_bps)`. Steps of 100,
-  capped at 10 000 per strategy. The contract does not cap the *sum*
-  across strategies; the UI does not warn either (open question — see
-  [FRONTEND_PLAN.md](FRONTEND_PLAN.md)).
+  capped at 10 000 per strategy. The contract enforces the sum cap
+  across active strategies via `vault_state.total_active_weight_bps`
+  (reverts with `WeightSumExceedsMax`); the UI mirrors this with a
+  running sum-cap progress bar.
 - **Update delegate** — `updateStrategyDelegate(new_delegate)`.
 - **Deactivate** — `deactivateStrategy()`. Permanent.
 - **Allocate / deallocate** — manual amounts via
@@ -358,11 +395,12 @@ of cards plus the rebalance-all action.
 ### Authority manual rebalance
 
 A **`rebalanceAll`** button in
-[`/admin/page.tsx`](app/src/app/admin/page.tsx) loops over active
-strategies and calls `rebalanceStrategy(id)` for each. Spec
-([§7.6](SOLANA_VAULT_SPEC.md)) wants an authority-only signed-delta
-push/pull radio; the UI is currently weight-driven and permissionless
-at the program level. See [MISMATCHES.md §2.2](MISMATCHES.md).
+[`/vault/[address]/admin/page.tsx`](app/src/app/vault/[address]/admin/page.tsx)
+loops over active strategies and calls `rebalanceStrategy(id)` for
+each. Phase-3 made `rebalance_strategy` authority-only at the program
+level; the UI is weight-driven (target = `total_deposited * weight_bps
+/ 10_000`). Spec ([§7.6](SOLANA_VAULT_SPEC.md)) additionally wants a
+signed-delta push/pull radio — see [MISMATCHES.md §2.2](MISMATCHES.md).
 
 ### Yield reporting
 
@@ -373,11 +411,23 @@ not surfaced as a dedicated UI button today; it's invoked by
 [`scripts/simulate-yield.ts`](scripts/simulate-yield.ts) for the
 demo.
 
-### Allowed-action whitelist editor / config editor / value-source editor
+### Allowed-action whitelist editor
 
-❌ **Not built.** All three are blocked on the program adding the
-underlying `AllowedAction` / `AutoActionConfig` / `ValueSource`
-accounts. See [MISMATCHES.md §2.1](MISMATCHES.md).
+✅ Shipped at the per-strategy admin route
+(`/vault/[address]/admin/strategy/[id]`). Adds / removes
+`AllowedAction` PDAs via [useAllowedActions.ts](app/src/hooks/useAllowedActions.ts).
+
+### Allowed-token panel
+
+✅ Shipped in [AllowedTokensPanel.tsx](app/src/components/admin/AllowedTokensPanel.tsx)
+on the per-vault admin route. Manages the protocol-level `AllowedToken`
+PDAs that gate which mints `initialize_vault` will accept.
+
+### Config editor / value-source editor
+
+❌ **Not built.** Blocked on the program adding the underlying
+`AutoActionConfig` / `ValueSource` accounts. See
+[MISMATCHES.md §2.1](MISMATCHES.md).
 
 ---
 
@@ -386,15 +436,13 @@ accounts. See [MISMATCHES.md §2.1](MISMATCHES.md).
 [`AdminGuard`](app/src/components/admin/AdminGuard.tsx) reads the
 on-chain `vault_state.admin` and `vault_state.authority` pubkeys
 from `VaultProvider` and compares to the connected wallet's
-`publicKey`. The guard is **all-or-nothing**: it either passes the
-children through or replaces them with a banner. There is no
-per-control disable (the EVM playbook calls for "disable, never
-hide"; the Solana port hasn't adopted that pattern yet — see
-[FRONTEND_PLAN.md](FRONTEND_PLAN.md) and
-[MISMATCHES.md §3](MISMATCHES.md)).
-
-There is no `useRoles`-style hook today; role state is pulled from
-`VaultProvider` directly.
+`publicKey`. Role booleans (`isAdmin`, `isAuthority`,
+`isPendingAdmin`, `isPendingAuthority`) are exposed via
+[`useRoles`](app/src/hooks/useRoles.ts) and consumed by individual
+controls to drive **disable-not-hide** UX (`PauseToggle`,
+`PerformanceFeeEditor`, etc.). The route-level guard remains
+all-or-nothing for the page itself; per-control disable is layered
+inside admin pages.
 
 ---
 
@@ -407,24 +455,29 @@ There is no `useRoles`-style hook today; role state is pulled from
 | [`useWithdraw`](app/src/hooks/useWithdraw.ts)                                            | `withdraw(shares_to_burn: BN)` → tx signature                                                                                                          |
 | [`useStrategies`](app/src/hooks/useStrategies.ts)                                        | Fetch every `StrategyAllocation` account for the active vault (memcmp filter on `vault`)                                                                |
 | [`useUserPosition`](app/src/hooks/useUserPosition.ts)                                    | User share + token balances + estimated underlying; periodic refresh                                                                                   |
-| [`useAdminActions`](app/src/hooks/useAdminActions.ts)                                    | `createStrategy(delegate)`, `deactivateStrategy(id)`, `updateDelegate(id, new)`, `setStrategyWeight(id, bps)`                                          |
-| [`useAuthorityActions`](app/src/hooks/useAuthorityActions.ts)                            | `allocate(id, amount)`, `deallocate(id, amount)`, `reportYield(id)`, `rebalanceStrategy(id)`, `rebalanceAll(strategies)`                               |
+| [`useAdminActions`](app/src/hooks/useAdminActions.ts)                                    | `createStrategy(delegate)`, `deactivateStrategy(id)`, `updateDelegate(id, new)`, `setStrategyWeight(id, bps)`, `proposeAdmin(new)`, `acceptAdmin()`, `proposeAuthority(new)`, `acceptAuthority()`, `setPaused(bool)`, `setPerformanceFeeBps(bps)` |
+| [`useAuthorityActions`](app/src/hooks/useAuthorityActions.ts)                            | `allocate(id, amount)`, `deallocate(id, amount)`, `reportYield(id)`, `reportLoss(id, amount)`, `rebalanceStrategy(id)`, `rebalanceAll(strategies)`     |
+| [`useRoles`](app/src/hooks/useRoles.ts)                                                  | `isAdmin`, `isAuthority`, `isPendingAdmin`, `isPendingAuthority` for the connected wallet                                                              |
+| [`useAllowedActions`](app/src/hooks/useAllowedActions.ts)                                | `addAllowedAction(strategy, target, disc, expectedRecipientIndex)`, `removeAllowedAction(...)`                                                         |
+| [`useAllowedTokens`](app/src/hooks/useAllowedTokens.ts)                                  | `addAllowedToken(mint)`, `removeAllowedToken(mint)`                                                                                                    |
+| [`useProtocolConfig`](app/src/hooks/useProtocolConfig.ts)                                | Read / initialize the singleton `ProtocolConfig` PDA                                                                                                    |
 
 > No `useAllowance` (Solana doesn't have ERC-20 allowance).
-> No `useRoles` — `VaultProvider` exposes `admin` / `authority`
-> pubkeys directly.
-> No `useStrategyAllowedActionsLogs` — no `AllowedAction` PDAs to
-> probe, no `ActionExecuted` events to replay (yet).
+> No `useStrategyAllowedActionsLogs` yet — `ActionExecuted` events
+> are emitted by the program and decoded in `ActivityFeed`, but a
+> dedicated per-strategy log hook hasn't been carved out.
 
 ---
 
 ## 11. Selectors and presets
 
-This frontend has no equivalent of the EVM playbook's
-`ACTION_PRESETS` / `KNOWN_ALLOWED_ACTION_TARGETS` /
-`signatureForSelector` / `CONFIG_PRESETS` / `VALUE_SOURCE_PRESETS`
-files. They will appear once the corresponding program features land
-(see [FRONTEND_PLAN.md](FRONTEND_PLAN.md) and
+`AllowedAction` editing is shipped, but the frontend does not yet
+ship the EVM-playbook-style preset libraries (`ACTION_PRESETS` /
+`KNOWN_ALLOWED_ACTION_TARGETS` / `signatureForSelector`). Today the
+`(target_program, discriminator)` triple is entered manually.
+`CONFIG_PRESETS` / `VALUE_SOURCE_PRESETS` will appear once the
+corresponding program features (`AutoActionConfig`, `ValueSource`)
+land (see [FRONTEND_PLAN.md](FRONTEND_PLAN.md) and
 [MISMATCHES.md §2.1](MISMATCHES.md)).
 
 ---
@@ -477,14 +530,12 @@ End-to-end against devnet:
 
 ## 14. Out of scope / deferred
 
-- **Activity feed** — blocked on `#[event]` emissions
-  ([MISMATCHES.md §2.5](MISMATCHES.md)).
-- **Allowed-action / config / value-source editors** — blocked on
-  the corresponding program features
+- **Config / value-source editors** — blocked on the corresponding
+  program features (`AutoActionConfig`, `ValueSource`)
   ([MISMATCHES.md §2.1](MISMATCHES.md)).
-- **Disable-not-hide role gating** — UX upgrade over the current
-  all-or-nothing `AdminGuard`
-  ([FRONTEND_PLAN.md](FRONTEND_PLAN.md)).
+- **Action-preset libraries** (`ACTION_PRESETS`, target-program /
+  discriminator catalogues) — `AllowedAction` editing is shipped,
+  but pasting a `(target, disc)` pair is still manual.
 - **Add custom vault dialog** — needs a paste-and-validate path
   against `program.account.vaultState.fetch(vaultPda)` plus
   `localStorage` persistence ([FRONTEND_PLAN.md](FRONTEND_PLAN.md)).
@@ -497,10 +548,6 @@ End-to-end against devnet:
 - **Indexer-backed analytics** — running APY, drawdown charts,
   cumulative yield. Needs an indexer once a real vault has production
   history.
-- **Sum-cap UX for active strategy weights** — the program does not
-  cap the sum at 10 000 bps; the UI does not warn (yet).
-- **`/vault/[…]/...` URL-encoded vault selection** — today only
-  `/` and `/admin` exist; `VaultProvider` holds the active vault.
 
 ---
 
@@ -511,16 +558,18 @@ following patterns are network-agnostic and worth carrying forward:
 
 - **Vault is always `(cluster, token_mint, vault_id)` (Solana) or
   `(chainId, address)` (EVM).** Never trust one component alone.
-- **Disable-not-hide for role-gated UI.** Roadmap item here, but the
-  reasoning carries over.
+- **Disable-not-hide for role-gated UI.** Adopted at the per-control
+  level via `useRoles`; route-level guard remains all-or-nothing.
 - **Build-time seed + runtime add via storage.** The
-  `localStorage`-backed runtime-add pattern works the same on Solana.
-- **Probe-by-known-pairs for non-enumerable on-chain state.** Once
-  `AllowedAction` PDAs ship, probe each `(strategy, target_program,
+  `localStorage`-backed runtime-add pattern works the same on Solana
+  (still a roadmap item).
+- **Probe-by-known-pairs for non-enumerable on-chain state.**
+  `AllowedAction` PDAs are probed by `(strategy, target_program,
   discriminator)` triple via
   `program.account.allowedAction.fetchNullable`.
 - **Push/pull radio for signed deltas.** Don't make the user think
   in signed integers (roadmap).
 - **Anti-theft enforcement is documented in the public popover.** The
-  `(target_program, discriminator)` whitelist should be visible to
-  any user, not just admins, once it exists.
+  `(target_program, discriminator)` whitelist is on-chain via
+  `AllowedAction` PDAs; surfacing it to non-admin users is a roadmap
+  item.

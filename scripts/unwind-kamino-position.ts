@@ -26,7 +26,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { MyProject } from "../target/types/my_project";
-import { Keypair, PublicKey, SystemProgram, Connection } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, SYSVAR_INSTRUCTIONS_PUBKEY, Connection } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
@@ -176,6 +176,7 @@ async function executeAction(
       delegateTokenAta: ctx.agentTokenAta,
       targetProgramAccount: ctx.kaminoProgramId,
       allowedOutputToken: SystemProgram.programId,
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(remainingAccounts)
     .signers([ctx.delegate])

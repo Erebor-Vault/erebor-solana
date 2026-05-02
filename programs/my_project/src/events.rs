@@ -143,6 +143,8 @@ pub struct AllowedActionAdded {
     pub discriminator: [u8; 8],
     pub expected_recipient_index: u16,
     pub output_mint_index: Option<u16>,
+    pub loss_per_call_bps_cap: u16,
+    pub cooldown_secs: u32,
 }
 
 #[event]
@@ -217,4 +219,59 @@ pub struct ProtocolFeeBpsSet {
 pub struct GovernanceSet {
     pub previous: Pubkey,
     pub new_governance: Pubkey,
+}
+
+#[event]
+pub struct AutoActionConfigSet {
+    pub vault: Pubkey,
+    pub strategy: Pubkey,
+    pub strategy_id: u64,
+    /// 0 = Deposit, 1 = Withdraw.
+    pub kind: u8,
+    pub target_program: Pubkey,
+    pub discriminator: [u8; 8],
+    pub ix_data_len: u32,
+}
+
+#[event]
+pub struct AutoActionConfigCleared {
+    pub vault: Pubkey,
+    pub strategy: Pubkey,
+    pub strategy_id: u64,
+    pub kind: u8,
+}
+
+#[event]
+pub struct ValueSourceAdded {
+    pub vault: Pubkey,
+    pub strategy: Pubkey,
+    pub strategy_id: u64,
+    pub index: u8,
+    pub kind: u8,
+    pub target_account: Pubkey,
+    pub offset: u32,
+    pub scale_num: u64,
+    pub scale_den: u64,
+}
+
+#[event]
+pub struct ValueSourceRemoved {
+    pub vault: Pubkey,
+    pub strategy: Pubkey,
+    pub strategy_id: u64,
+    pub index: u8,
+}
+
+#[event]
+pub struct StrategyValueSettled {
+    pub vault: Pubkey,
+    pub strategy: Pubkey,
+    pub strategy_id: u64,
+    /// Strategy's `allocated_amount` before the settle.
+    pub previous_allocated: u64,
+    /// Computed live value as the sum across the strategy's value sources.
+    pub computed_value: u64,
+    /// Signed delta booked into both `strategy.allocated_amount` and
+    /// `vault.total_deposited`. Positive = yield, negative = loss.
+    pub delta_signed: i64,
 }

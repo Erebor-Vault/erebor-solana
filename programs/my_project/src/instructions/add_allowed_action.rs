@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+use crate::constants::*;
 use crate::errors::*;
 use crate::events::*;
 use crate::state::*;
@@ -52,7 +53,15 @@ pub fn handler(
     // mint pubkey. When set, execute_action requires the mint to be
     // on the protocol-level allow-list (an `AllowedToken` PDA).
     output_mint_index: Option<u16>,
+    // Phase-5: per-action risk gates.
+    loss_per_call_bps_cap: u16,
+    cooldown_secs: u32,
 ) -> Result<()> {
+    require!(
+        loss_per_call_bps_cap <= MAX_LOSS_PER_CALL_BPS,
+        VaultError::LossCapTooHigh
+    );
+
     let allowed = &mut ctx.accounts.allowed_action;
     allowed.vault = ctx.accounts.vault_state.key();
     allowed.strategy = ctx.accounts.strategy.key();
@@ -61,7 +70,11 @@ pub fn handler(
     allowed.discriminator = discriminator;
     allowed.expected_recipient_index = expected_recipient_index;
     allowed.output_mint_index = output_mint_index;
+    allowed.loss_per_call_bps_cap = loss_per_call_bps_cap;
+    allowed.cooldown_secs = cooldown_secs;
+    allowed.last_executed_at = 0;
     allowed.bump = ctx.bumps.allowed_action;
+    allowed._reserved = [0; 32];
 
     emit!(AllowedActionAdded {
         vault: ctx.accounts.vault_state.key(),
@@ -71,6 +84,8 @@ pub fn handler(
         discriminator,
         expected_recipient_index,
         output_mint_index,
+        loss_per_call_bps_cap,
+        cooldown_secs,
     });
     Ok(())
 }

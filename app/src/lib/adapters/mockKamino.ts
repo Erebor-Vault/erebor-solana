@@ -1,6 +1,6 @@
 /**
  * Mock-Kamino redeem adapter. Targets the in-repo `mock_kamino` program
- * deployed on devnet at `S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK` and
+ * deployed on devnet at `H4tUCeXMQduSmB6fjqbYMdFb49E8YnEHku5NWFrWKaGU` and
  * mirrors a single-reserve cToken model close enough to real Kamino Lend
  * that the program-side execute_action path is exercised end-to-end.
  *
@@ -12,6 +12,7 @@
 import {
   PublicKey,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   TransactionInstruction,
   AccountMeta,
 } from "@solana/web3.js";
@@ -24,7 +25,7 @@ import { sha256 } from "@noble/hashes/sha2";
 import type { RedeemAdapter, ProtocolPosition } from "./types";
 
 export const MOCK_KAMINO_PROGRAM_ID = new PublicKey(
-  "S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK",
+  "H4tUCeXMQduSmB6fjqbYMdFb49E8YnEHku5NWFrWKaGU",
 );
 
 /** Anchor discriminator: sha256("global:withdraw_obligation_collateral_and_redeem_reserve_collateral")[..8]. */
@@ -256,6 +257,7 @@ export const mockKaminoAdapter: RedeemAdapter = {
         // should be `null`. Pass SystemProgram::id as a placeholder; the
         // program ignores it when the gate isn't enabled.
         allowedOutputToken: SystemProgram.programId,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
       .remainingAccounts(remainingAccounts)
       .instruction();

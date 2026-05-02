@@ -43,11 +43,12 @@
  */
 
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
+import { Program, AnchorError } from "@coral-xyz/anchor";
 import {
   Keypair,
   PublicKey,
   SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
   TransactionInstruction,
   AccountMeta,
@@ -424,6 +425,8 @@ async function main() {
       depositDisc,
       0, // recipient_index = source slot
       null, // output_mint_index — same-token Kamino deposit, not a swap
+      0, // loss_per_call_bps_cap — disabled
+      0, // cooldown_secs — disabled
     )
     .accountsStrict({
       admin: wallet.publicKey,
@@ -448,6 +451,8 @@ async function main() {
       withdrawDisc,
       1,
       null,
+      0,
+      0,
     )
     .accountsStrict({
       admin: wallet.publicKey,
@@ -546,6 +551,7 @@ async function main() {
       delegateTokenAta: agentTokenAta,
       targetProgramAccount: mockKamino.programId,
       allowedOutputToken: SystemProgram.programId, // unused (no output_mint_index on this action)
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(depositRemaining)
     .signers([agent])
@@ -613,6 +619,7 @@ async function main() {
       delegateTokenAta: agentTokenAta,
       targetProgramAccount: mockKamino.programId,
       allowedOutputToken: SystemProgram.programId, // unused (no output_mint_index on this action)
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(withdrawRemaining)
     .signers([agent])
@@ -663,6 +670,276 @@ async function main() {
   );
 
   console.log(`\n✓ E2E happy path complete\n`);
+
+  // ----------------------------------------
+  // [10] ActionCooldownActive negative path
+  // ----------------------------------------
+  // The happy path drained the strategy. Re-allocate fresh funds, then
+  // remove + re-add the deposit AllowedAction with a cooldown so the
+  // first execute_action stamps `last_executed_at` and the second
+  // (immediate) call reverts.
+  console.log(`\n[10] ActionCooldownActive negative path...`);
+  const COOLDOWN_ALLOCATION = 100_000_000; // 100 USDC
+  const COOLDOWN_DEPOSIT = 10_000_000; // 10 USDC per call
+  await myProject.methods
+    .allocateToStrategy(new BN(COOLDOWN_ALLOCATION))
+    .accountsStrict({
+      authority: wallet.publicKey,
+      vaultState: vaultPda,
+      vaultAuthority,
+      strategy: strategyPda,
+      tokenMint: liquidityMint,
+      reserveAta,
+      strategyTokenAccount,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .rpc();
+
+  // Remove the existing AllowedAction (was registered without cooldown), then re-add with cooldown_secs = 60.
+  await myProject.methods
+    .removeAllowedAction(new BN(STRATEGY_ID), mockKamino.programId, depositDisc)
+    .accountsStrict({
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      allowedAction: depositAllowedAction,
+    })
+    .rpc();
+  await myProject.methods
+    .addAllowedAction(
+      new BN(STRATEGY_ID),
+      mockKamino.programId,
+      depositDisc,
+      0, // recipient_index
+      null, // output_mint_index
+      0, // loss_per_call_bps_cap (disabled here — exercised in [11])
+      60 // cooldown_secs — 60s minimum between calls
+    )
+    .accountsStrict({
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      allowedAction: depositAllowedAction,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const cooldownIxData = encodeDepositArgs(new BN(COOLDOWN_DEPOSIT));
+  // First call — succeeds, stamps last_executed_at.
+  await myProject.methods
+    .executeAction(new BN(STRATEGY_ID), mockKamino.programId, depositDisc, cooldownIxData)
+    .accountsStrict({
+      caller: agent.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      strategyAuthority,
+      allowedAction: depositAllowedAction,
+      callerTokenAta: agentTokenAta,
+      delegateTokenAta: agentTokenAta,
+      targetProgramAccount: mockKamino.programId,
+      allowedOutputToken: SystemProgram.programId,
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+    })
+    .remainingAccounts(depositRemaining)
+    .signers([agent])
+    .rpc();
+  console.log(`    first execute_action(deposit) succeeded (cooldown stamped)`);
+
+  // Second call within 60s — must revert ActionCooldownActive.
+  let cooldownErr: unknown = null;
+  try {
+    await myProject.methods
+      .executeAction(new BN(STRATEGY_ID), mockKamino.programId, depositDisc, cooldownIxData)
+      .accountsStrict({
+        caller: agent.publicKey,
+        vaultState: vaultPda,
+        strategy: strategyPda,
+        strategyAuthority,
+        allowedAction: depositAllowedAction,
+        callerTokenAta: agentTokenAta,
+        delegateTokenAta: agentTokenAta,
+        targetProgramAccount: mockKamino.programId,
+        allowedOutputToken: SystemProgram.programId,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .remainingAccounts(depositRemaining)
+      .signers([agent])
+      .rpc();
+  } catch (err) {
+    cooldownErr = err;
+  }
+  if (!cooldownErr) {
+    throw new Error("[10] expected ActionCooldownActive — second call should have reverted");
+  }
+  const cooldownCode = (cooldownErr as AnchorError).error?.errorCode?.code;
+  if (cooldownCode !== "ActionCooldownActive") {
+    throw new Error(`[10] expected ActionCooldownActive, got ${cooldownCode}`);
+  }
+  console.log(`    second execute_action reverted ActionCooldownActive ✓`);
+
+  // ----------------------------------------
+  // [11] ActionLossExceedsCap negative path
+  // ----------------------------------------
+  // Re-register the deposit AllowedAction with loss_per_call_bps_cap = 100 (1%)
+  // and cooldown disabled. allocated_amount currently ~100 USDC (we only
+  // pulled COOLDOWN_DEPOSIT = 10 of it into Kamino in [10], so the rest is
+  // still tracked there). Cap = 100 USDC × 100 / 10_000 = 1 USDC. We then
+  // try to push another 50 USDC into Kamino — outflow far exceeds cap.
+  console.log(`\n[11] ActionLossExceedsCap negative path...`);
+  await myProject.methods
+    .removeAllowedAction(new BN(STRATEGY_ID), mockKamino.programId, depositDisc)
+    .accountsStrict({
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      allowedAction: depositAllowedAction,
+    })
+    .rpc();
+  await myProject.methods
+    .addAllowedAction(
+      new BN(STRATEGY_ID),
+      mockKamino.programId,
+      depositDisc,
+      0,
+      null,
+      100, // loss_per_call_bps_cap = 1% of allocated_amount per call
+      0 // cooldown disabled
+    )
+    .accountsStrict({
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      allowedAction: depositAllowedAction,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const overCapIxData = encodeDepositArgs(new BN(50_000_000)); // 50 USDC, far above 1% cap
+  let lossCapErr: unknown = null;
+  try {
+    await myProject.methods
+      .executeAction(new BN(STRATEGY_ID), mockKamino.programId, depositDisc, overCapIxData)
+      .accountsStrict({
+        caller: agent.publicKey,
+        vaultState: vaultPda,
+        strategy: strategyPda,
+        strategyAuthority,
+        allowedAction: depositAllowedAction,
+        callerTokenAta: agentTokenAta,
+        delegateTokenAta: agentTokenAta,
+        targetProgramAccount: mockKamino.programId,
+        allowedOutputToken: SystemProgram.programId,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .remainingAccounts(depositRemaining)
+      .signers([agent])
+      .rpc();
+  } catch (err) {
+    lossCapErr = err;
+  }
+  if (!lossCapErr) {
+    throw new Error("[11] expected ActionLossExceedsCap — over-cap deposit should have reverted");
+  }
+  const lossCapCode = (lossCapErr as AnchorError).error?.errorCode?.code;
+  if (lossCapCode !== "ActionLossExceedsCap") {
+    throw new Error(`[11] expected ActionLossExceedsCap, got ${lossCapCode}`);
+  }
+  console.log(`    over-cap execute_action reverted ActionLossExceedsCap ✓`);
+
+  // ----------------------------------------
+  // [12] settle_strategy_value loss branch
+  // ----------------------------------------
+  // Register a ValueSource pointing at the strategy_authority's cToken ATA
+  // with kind=SplAtaBalance and a 1/2 scale (cTokens worth half their face).
+  // Total = strategy_ata.amount + cToken_balance × 1/2 — by construction
+  // this is less than allocated_amount, so settle books a negative delta.
+  console.log(`\n[12] settle_strategy_value loss branch...`);
+  const [valueSourcePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("value_source"), strategyPda.toBuffer(), Buffer.from([0])],
+    myProject.programId
+  );
+  await myProject.methods
+    .addValueSource(
+      new BN(STRATEGY_ID),
+      0, // index
+      0, // kind = SplAtaBalance
+      strategyCollateralAta,
+      0, // offset (ignored for SplAtaBalance)
+      new BN(1), // scale_num
+      new BN(2) // scale_den — cTokens worth half their face value
+    )
+    .accountsStrict({
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      valueSource: valueSourcePda,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const strategyAtaBefore = await provider.connection.getTokenAccountBalance(strategyTokenAccount);
+  const cTokenBalSettle = await provider.connection.getTokenAccountBalance(strategyCollateralAta);
+  const strategyState = await myProject.account.strategyAllocation.fetch(strategyPda);
+  const expectedComputed =
+    Number(strategyAtaBefore.value.amount) + Math.floor(Number(cTokenBalSettle.value.amount) / 2);
+  const expectedDelta = expectedComputed - strategyState.allocatedAmount.toNumber();
+  console.log(
+    `    pre-settle: strategy_ata=${strategyAtaBefore.value.uiAmountString} ` +
+      `cTokens=${cTokenBalSettle.value.amount} ` +
+      `allocated=${strategyState.allocatedAmount.toString()} ` +
+      `expected_computed=${expectedComputed} expected_delta=${expectedDelta}`
+  );
+  if (expectedDelta >= 0) {
+    throw new Error(
+      `[12] fixture broken — expected_delta is non-negative (${expectedDelta}); test cannot exercise loss branch`
+    );
+  }
+
+  const vaultBefore = await myProject.account.vaultState.fetch(vaultPda);
+  await myProject.methods
+    .settleStrategyValue(new BN(STRATEGY_ID))
+    .accountsStrict({
+      authority: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      strategyTokenAccount,
+    })
+    .remainingAccounts([
+      { pubkey: valueSourcePda, isSigner: false, isWritable: false },
+      { pubkey: strategyCollateralAta, isSigner: false, isWritable: false },
+    ])
+    .rpc();
+  const vaultAfter = await myProject.account.vaultState.fetch(vaultPda);
+  const strategyAfter = await myProject.account.strategyAllocation.fetch(strategyPda);
+  const totalDelta = vaultAfter.totalDeposited.sub(vaultBefore.totalDeposited).toNumber();
+  console.log(
+    `    post-settle: strategy.allocated=${strategyAfter.allocatedAmount.toString()} ` +
+      `vault.total_deposited delta=${totalDelta}`
+  );
+  if (totalDelta !== expectedDelta) {
+    throw new Error(
+      `[12] settle delta mismatch — expected ${expectedDelta}, got ${totalDelta}`
+    );
+  }
+  if (strategyAfter.allocatedAmount.toNumber() !== expectedComputed) {
+    throw new Error(
+      `[12] settle allocated_amount mismatch — expected ${expectedComputed}, got ${strategyAfter.allocatedAmount.toString()}`
+    );
+  }
+  console.log(`    settle_strategy_value booked the expected loss ✓`);
+
+  // Cleanup: close the ValueSource so the rent comes back to the admin.
+  await myProject.methods
+    .removeValueSource(new BN(STRATEGY_ID), 0)
+    .accountsStrict({
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      strategy: strategyPda,
+      valueSource: valueSourcePda,
+    })
+    .rpc();
+
+  console.log(`\n✓ E2E negative paths complete (cooldown, loss-cap, settle-loss)\n`);
 }
 
 main().catch((err) => {

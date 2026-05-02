@@ -143,7 +143,7 @@ describe("PDA derivation", () => {
     const strategyPda = deriveStrategyPda(vaultPda, 0, PROGRAM_ID);
     // Two synthetic target programs + two synthetic 8-byte discriminators.
     const targetA = new PublicKey("HLDVeTCx7mJeHApCpDptwbHd78iLCPYrFnVAymjrANp2");
-    const targetB = new PublicKey("3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm");
+    const targetB = new PublicKey("DUECqnJ77fP2Kd9SqeTsVc9n7MiTaBvSW3mREM8DuBVs");
     const discA: number[] = [1, 2, 3, 4, 5, 6, 7, 8];
     const discB: number[] = [8, 7, 6, 5, 4, 3, 2, 1];
 

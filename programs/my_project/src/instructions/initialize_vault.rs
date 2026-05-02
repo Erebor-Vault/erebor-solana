@@ -78,6 +78,7 @@ pub fn handler(ctx: Context<InitializeVault>, vault_id: u64) -> Result<()> {
     vault.total_active_weight_bps = 0;
     vault.pending_admin = Pubkey::default();
     vault.pending_authority = Pubkey::default();
+    vault._reserved = [0; 64];
 
     emit!(VaultInitialized {
         vault: vault.key(),

@@ -12,7 +12,7 @@ import BN from "bn.js";
 import * as fs from "fs";
 
 const RPC_URL = "https://api.devnet.solana.com";
-const TOKEN_MINT = new PublicKey("5BTPntEhZXMK4FTjJe3VqJM1qZZr58ANpWfJQThPRb6N");
+const TOKEN_MINT = new PublicKey("7MNPXdG3oEWFdJNGPuQMDVZzGNXts1zhCLejD49Lp3hE");
 const NAMES = [
   "AT trader agent",
   "Conservative",

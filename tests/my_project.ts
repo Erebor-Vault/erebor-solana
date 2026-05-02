@@ -7,7 +7,12 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program, AnchorError } from "@coral-xyz/anchor";
 import { MyProject } from "../target/types/my_project";
-import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+} from "@solana/web3.js";
 import {
   createMint,
   createAssociatedTokenAccount,
@@ -903,7 +908,7 @@ describe("my_project — phase-3", () => {
 
     const allowed = deriveAllowedAction(strategy1.strategy, targetProgram, disc);
     await program.methods
-      .addAllowedAction(new BN(1), targetProgram, [...disc] as any, 3, null)
+      .addAllowedAction(new BN(1), targetProgram, [...disc] as any, 3, null, 0, 0)
       .accountsStrict({
         admin: admin.publicKey,
         vaultState,
@@ -1015,7 +1020,7 @@ describe("my_project — phase-3", () => {
     // Register the action with output_mint_index = 1 (we'll pin a fake mint
     // there in remaining_accounts).
     await program.methods
-      .addAllowedAction(new BN(1), targetProgram, [...disc] as any, 0, 1)
+      .addAllowedAction(new BN(1), targetProgram, [...disc] as any, 0, 1, 0, 0)
       .accountsStrict({
         admin: admin.publicKey,
         vaultState,
@@ -1063,6 +1068,7 @@ describe("my_project — phase-3", () => {
           delegateTokenAta: delegateAta.address,
           targetProgramAccount: targetProgram,
           allowedOutputToken: allowedTokenPda,
+          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .remainingAccounts([
           { pubkey: strategy1.strategyTokenAccount, isSigner: false, isWritable: true },
@@ -1104,6 +1110,7 @@ describe("my_project — phase-3", () => {
           delegateTokenAta: delegateAta.address,
           targetProgramAccount: targetProgram,
           allowedOutputToken: allowedTokenPda,
+          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .remainingAccounts([
           { pubkey: strategy1.strategyTokenAccount, isSigner: false, isWritable: true },

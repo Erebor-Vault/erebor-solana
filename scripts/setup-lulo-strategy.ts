@@ -308,7 +308,9 @@ async function main() {
         luloProgram.programId,
         Array.from(disc) as any,
         action.recipientIndex,
-        null
+        null,
+        0,
+        0
       )
       .accountsStrict({
         admin: payer.publicKey,

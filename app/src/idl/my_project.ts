@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/my_project.json`.
  */
 export type MyProject = {
-  "address": "B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z",
+  "address": "FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo",
   "metadata": {
     "name": "myProject",
     "version": "0.1.0",
@@ -253,6 +253,14 @@ export type MyProject = {
           "type": {
             "option": "u16"
           }
+        },
+        {
+          "name": "lossPerCallBpsCap",
+          "type": "u16"
+        },
+        {
+          "name": "cooldownSecs",
+          "type": "u32"
         }
       ]
     },
@@ -340,6 +348,126 @@ export type MyProject = {
         {
           "name": "mint",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "addValueSource",
+      "docs": [
+        "Admin-only. Registers a `ValueSource` slot for a strategy. `kind`",
+        "0 = SplAtaBalance (read u64 at offset 64..72 of `target_account`);",
+        "1 = AccountU64 (read u64 at `offset..offset+8`). The raw read is",
+        "scaled by `scale_num/scale_den` to convert into underlying-token",
+        "units (e.g. cToken → underlying via the protocol's exchange rate)."
+      ],
+      "discriminator": [
+        129,
+        233,
+        79,
+        215,
+        94,
+        55,
+        20,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "strategyId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "valueSource",
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "strategyId",
+          "type": "u64"
+        },
+        {
+          "name": "index",
+          "type": "u8"
+        },
+        {
+          "name": "kind",
+          "type": "u8"
+        },
+        {
+          "name": "targetAccount",
+          "type": "pubkey"
+        },
+        {
+          "name": "offset",
+          "type": "u32"
+        },
+        {
+          "name": "scaleNum",
+          "type": "u64"
+        },
+        {
+          "name": "scaleDen",
+          "type": "u64"
         }
       ]
     },
@@ -494,6 +622,100 @@ export type MyProject = {
         {
           "name": "amount",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "clearAutoActionConfig",
+      "docs": [
+        "Admin-only. Closes the AutoActionConfig PDA, returning rent to the",
+        "admin. Call before re-issuing `set_auto_action_config` for the",
+        "same `(strategy, kind)` to update the recorded intent."
+      ],
+      "discriminator": [
+        180,
+        224,
+        220,
+        250,
+        58,
+        71,
+        222,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "strategyId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "autoActionConfig",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "strategyId",
+          "type": "u64"
+        },
+        {
+          "name": "kind",
+          "type": "u8"
         }
       ]
     },
@@ -1344,6 +1566,7 @@ export type MyProject = {
         },
         {
           "name": "allowedAction",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -1407,6 +1630,14 @@ export type MyProject = {
             "owned by this program. When `None`, the account is unused. Caller",
             "passes any account (e.g. SystemProgram::id) as a placeholder."
           ]
+        },
+        {
+          "name": "instructionsSysvar",
+          "docs": [
+            "introspection to ensure no other instruction in the same",
+            "transaction touches the strategy ATA."
+          ],
+          "address": "Sysvar1nstructions1111111111111111111111111"
         }
       ],
       "args": [
@@ -1975,6 +2206,205 @@ export type MyProject = {
       "args": []
     },
     {
+      "name": "rebalanceWithDelta",
+      "docs": [
+        "Phase-5: explicit signed-delta rebalance. Authority-only. Pushes",
+        "`delta` if positive (reserve → strategy) and pulls if negative",
+        "(strategy → reserve). Reverts on overflow / under-flow / when the",
+        "reserve can't cover a positive delta."
+      ],
+      "discriminator": [
+        69,
+        173,
+        38,
+        184,
+        82,
+        238,
+        227,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "writable": true
+        },
+        {
+          "name": "strategyAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "strategy.strategy_id",
+                "account": "strategyAllocation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenMint"
+        },
+        {
+          "name": "reserveAta",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "vaultAuthority"
+              },
+              {
+                "kind": "account",
+                "path": "tokenProgram"
+              },
+              {
+                "kind": "account",
+                "path": "tokenMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "strategyTokenAccount",
+          "writable": true
+        },
+        {
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "delta",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "removeAllowedAction",
       "discriminator": [
         241,
@@ -2191,6 +2621,98 @@ export type MyProject = {
       ]
     },
     {
+      "name": "removeValueSource",
+      "docs": [
+        "Admin-only. Closes a `ValueSource` PDA, returning rent."
+      ],
+      "discriminator": [
+        79,
+        214,
+        185,
+        84,
+        66,
+        177,
+        112,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "strategyId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "valueSource",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "strategyId",
+          "type": "u64"
+        },
+        {
+          "name": "index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "reportLoss",
       "docs": [
         "Authority reports a realized loss on a strategy. Decrements both",
@@ -2309,6 +2831,122 @@ export type MyProject = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "setAutoActionConfig",
+      "docs": [
+        "Admin-only. Records the curator's intended `(target, disc, ix_data)`",
+        "for what this strategy should do when funds enter (kind=0) or",
+        "leave (kind=1). Read off-chain by the agent; on-chain auto-CPI",
+        "invocation is a future phase."
+      ],
+      "discriminator": [
+        158,
+        124,
+        99,
+        174,
+        255,
+        136,
+        157,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "strategyId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "autoActionConfig",
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "strategyId",
+          "type": "u64"
+        },
+        {
+          "name": "kind",
+          "type": "u8"
+        },
+        {
+          "name": "targetProgram",
+          "type": "pubkey"
+        },
+        {
+          "name": "discriminator",
+          "type": {
+            "array": [
+              "u8",
+              8
+            ]
+          }
+        },
+        {
+          "name": "ixData",
+          "type": "bytes"
+        }
+      ]
     },
     {
       "name": "setGovernance",
@@ -2656,6 +3294,98 @@ export type MyProject = {
         {
           "name": "newTreasury",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "settleStrategyValue",
+      "docs": [
+        "Authority-only. Computes a strategy's live total (idle ATA balance",
+        "plus the sum of registered ValueSources, scaled into underlying",
+        "units) and settles `strategy.allocated_amount` + `vault.total_deposited`",
+        "to match. Pause-gated. Caller passes",
+        "`[value_source_pda, target_account]` pairs in `remaining_accounts`."
+      ],
+      "discriminator": [
+        243,
+        126,
+        139,
+        108,
+        162,
+        202,
+        200,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "vaultState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.token_mint",
+                "account": "vaultState"
+              },
+              {
+                "kind": "account",
+                "path": "vault_state.vault_id",
+                "account": "vaultState"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  114,
+                  97,
+                  116,
+                  101,
+                  103,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vaultState"
+              },
+              {
+                "kind": "arg",
+                "path": "strategyId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "strategyTokenAccount"
+        }
+      ],
+      "args": [
+        {
+          "name": "strategyId",
+          "type": "u64"
         }
       ]
     },
@@ -3219,6 +3949,19 @@ export type MyProject = {
       ]
     },
     {
+      "name": "autoActionConfig",
+      "discriminator": [
+        57,
+        184,
+        253,
+        193,
+        176,
+        74,
+        8,
+        35
+      ]
+    },
+    {
       "name": "protocolConfig",
       "discriminator": [
         207,
@@ -3242,6 +3985,19 @@ export type MyProject = {
         240,
         142,
         117
+      ]
+    },
+    {
+      "name": "valueSource",
+      "discriminator": [
+        98,
+        73,
+        220,
+        46,
+        214,
+        234,
+        72,
+        162
       ]
     },
     {
@@ -3374,6 +4130,32 @@ export type MyProject = {
         30,
         25,
         16
+      ]
+    },
+    {
+      "name": "autoActionConfigCleared",
+      "discriminator": [
+        254,
+        230,
+        35,
+        248,
+        200,
+        93,
+        144,
+        198
+      ]
+    },
+    {
+      "name": "autoActionConfigSet",
+      "discriminator": [
+        5,
+        28,
+        221,
+        73,
+        106,
+        160,
+        191,
+        176
       ]
     },
     {
@@ -3559,6 +4341,19 @@ export type MyProject = {
       ]
     },
     {
+      "name": "strategyValueSettled",
+      "discriminator": [
+        207,
+        89,
+        207,
+        188,
+        173,
+        31,
+        49,
+        18
+      ]
+    },
+    {
       "name": "strategyWeightSet",
       "discriminator": [
         7,
@@ -3582,6 +4377,32 @@ export type MyProject = {
         194,
         109,
         166
+      ]
+    },
+    {
+      "name": "valueSourceAdded",
+      "discriminator": [
+        3,
+        207,
+        161,
+        211,
+        39,
+        216,
+        201,
+        53
+      ]
+    },
+    {
+      "name": "valueSourceRemoved",
+      "discriminator": [
+        205,
+        178,
+        87,
+        45,
+        77,
+        186,
+        183,
+        79
       ]
     },
     {
@@ -3784,6 +4605,81 @@ export type MyProject = {
       "code": 6031,
       "name": "outputMintIndexOutOfRange",
       "msg": "Output mint index is out of range of remaining_accounts"
+    },
+    {
+      "code": 6032,
+      "name": "actionCooldownActive",
+      "msg": "Allowed-action cooldown has not elapsed"
+    },
+    {
+      "code": 6033,
+      "name": "actionLossExceedsCap",
+      "msg": "Loss booked by execute_action exceeds the per-action cap"
+    },
+    {
+      "code": 6034,
+      "name": "lossCapTooHigh",
+      "msg": "Per-action loss cap exceeds protocol maximum"
+    },
+    {
+      "code": 6035,
+      "name": "siblingInstructionForbidden",
+      "msg": "Sibling instruction in this transaction is forbidden by introspection guard"
+    },
+    {
+      "code": 6036,
+      "name": "deltaOutOfRange",
+      "msg": "Signed delta would push allocated_amount negative or overflow"
+    },
+    {
+      "code": 6037,
+      "name": "invalidAutoActionKind",
+      "msg": "AutoActionConfig kind must be 0 (Deposit) or 1 (Withdraw)"
+    },
+    {
+      "code": 6038,
+      "name": "autoActionDataTooLarge",
+      "msg": "AutoActionConfig ix_data exceeds the 256-byte cap"
+    },
+    {
+      "code": 6039,
+      "name": "invalidValueSourceKind",
+      "msg": "ValueSource kind must be 0 (SplAtaBalance) or 1 (AccountU64)"
+    },
+    {
+      "code": 6040,
+      "name": "valueSourceIndexOutOfBounds",
+      "msg": "ValueSource index exceeds MAX_VALUE_SOURCES_PER_STRATEGY"
+    },
+    {
+      "code": 6041,
+      "name": "invalidValueSourceScale",
+      "msg": "ValueSource scale_den must be non-zero"
+    },
+    {
+      "code": 6042,
+      "name": "valueSourceTargetMismatch",
+      "msg": "ValueSource target account passed in remaining_accounts does not match the registered target"
+    },
+    {
+      "code": 6043,
+      "name": "valueSourceTargetTooSmall",
+      "msg": "ValueSource target account data is shorter than required offset+8"
+    },
+    {
+      "code": 6044,
+      "name": "accountMismatch",
+      "msg": "Account passed in remaining_accounts does not match the expected key/owner/layout"
+    },
+    {
+      "code": 6045,
+      "name": "valueSourceTargetIsStrategyAta",
+      "msg": "ValueSource target_account must not equal the strategy's own ATA (would double-count)"
+    },
+    {
+      "code": 6046,
+      "name": "fanOutExceedsDeposit",
+      "msg": "Cumulative fan-out from a single deposit cannot exceed the deposit amount"
     }
   ],
   "types": [
@@ -3920,8 +4816,47 @@ export type MyProject = {
             }
           },
           {
+            "name": "lossPerCallBpsCap",
+            "docs": [
+              "Phase-5: max loss this single call may book against the strategy",
+              "ATA, in basis points of `strategy.allocated_amount` at call time.",
+              "`0` disables the check. Capped at `MAX_LOSS_PER_CALL_BPS`."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "cooldownSecs",
+            "docs": [
+              "Phase-5: minimum seconds between successful invocations of this",
+              "allowed action. `0` disables. Combined with `last_executed_at` to",
+              "rate-limit a compromised agent."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "lastExecutedAt",
+            "docs": [
+              "Phase-5: unix timestamp of last successful `execute_action` for",
+              "this `(strategy, target, discriminator)` triple. Set inside the",
+              "instruction handler."
+            ],
+            "type": "i64"
+          },
+          {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Forward-compatibility cushion. See `VaultState._reserved`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -3965,6 +4900,14 @@ export type MyProject = {
             "type": {
               "option": "u16"
             }
+          },
+          {
+            "name": "lossPerCallBpsCap",
+            "type": "u16"
+          },
+          {
+            "name": "cooldownSecs",
+            "type": "u32"
           }
         ]
       }
@@ -4084,6 +5027,145 @@ export type MyProject = {
           {
             "name": "newAuthority",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "autoActionConfig",
+      "docs": [
+        "Phase-5: declarative \"what should this strategy do when funds enter",
+        "(kind = 0) or leave (kind = 1)\" record. Read off-chain by the agent;",
+        "the agent then calls `execute_action` with this `(target_program,",
+        "discriminator, ix_data)` tuple. Frontend reads it to display",
+        "auto-deploy intent. Auto-CPI from inside `deposit` / `rebalance` is",
+        "not yet wired — admin-curated declaration today, on-chain enforcement",
+        "later."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 = Deposit, 1 = Withdraw. Anything else is rejected at set time."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "targetProgram",
+            "type": "pubkey"
+          },
+          {
+            "name": "discriminator",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "ixData",
+            "docs": [
+              "Phase-5: bytes appended after the `discriminator` to form the",
+              "inner CPI's `data`. Capped at 256 to bound rent + compute. Most",
+              "adapters fit in <64 bytes (a single `u64` amount + a few flags)."
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "autoActionConfigCleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "autoActionConfigSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 = Deposit, 1 = Withdraw."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "targetProgram",
+            "type": "pubkey"
+          },
+          {
+            "name": "discriminator",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "ixDataLen",
+            "type": "u32"
           }
         ]
       }
@@ -4418,6 +5500,18 @@ export type MyProject = {
               "Stored bump for the strategy_authority PDA."
             ],
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Phase-5: forward-compatibility cushion. See `VaultState._reserved`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -4491,6 +5585,48 @@ export type MyProject = {
       }
     },
     {
+      "name": "strategyValueSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "previousAllocated",
+            "docs": [
+              "Strategy's `allocated_amount` before the settle."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "computedValue",
+            "docs": [
+              "Computed live value as the sum across the strategy's value sources."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deltaSigned",
+            "docs": [
+              "Signed delta booked into both `strategy.allocated_amount` and",
+              "`vault.total_deposited`. Positive = yield, negative = loss."
+            ],
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "strategyWeightSet",
       "type": {
         "kind": "struct",
@@ -4526,6 +5662,152 @@ export type MyProject = {
           {
             "name": "newTreasury",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "valueSource",
+      "docs": [
+        "Phase-5: per-strategy value-source registry entry. A strategy can have",
+        "up to `MAX_VALUE_SOURCES_PER_STRATEGY` sources; the live value of the",
+        "strategy is the sum across them. Source kinds:",
+        "- kind = 0 (SplAtaBalance): read the SPL Token Account `amount` at",
+        "offset 64..72 of `target_account.data`. `offset` is ignored.",
+        "- kind = 1 (AccountU64): read the u64 at `target_account.data[offset..offset+8]`.",
+        "",
+        "`scale_num / scale_den` is then applied to convert the raw read into",
+        "underlying-token units (e.g. cToken → underlying via the protocol's",
+        "exchange rate). Both default to 1."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "index",
+            "docs": [
+              "Per-strategy slot index, 0..MAX_VALUE_SOURCES_PER_STRATEGY-1."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 = SplAtaBalance, 1 = AccountU64."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "targetAccount",
+            "type": "pubkey"
+          },
+          {
+            "name": "offset",
+            "docs": [
+              "Byte offset for `AccountU64`. Ignored for `SplAtaBalance`."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "scaleNum",
+            "type": "u64"
+          },
+          {
+            "name": "scaleDen",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "valueSourceAdded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "targetAccount",
+            "type": "pubkey"
+          },
+          {
+            "name": "offset",
+            "type": "u32"
+          },
+          {
+            "name": "scaleNum",
+            "type": "u64"
+          },
+          {
+            "name": "scaleDen",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "valueSourceRemoved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategy",
+            "type": "pubkey"
+          },
+          {
+            "name": "strategyId",
+            "type": "u64"
+          },
+          {
+            "name": "index",
+            "type": "u8"
           }
         ]
       }
@@ -4636,6 +5918,20 @@ export type MyProject = {
           {
             "name": "pendingAuthority",
             "type": "pubkey"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "Phase-5: forward-compatibility cushion so future fields can be",
+              "added by re-binarising existing accounts via `realloc` rather than",
+              "orphaning live state. Keep zeroed."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }

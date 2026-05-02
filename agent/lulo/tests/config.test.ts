@@ -32,7 +32,7 @@ function setMinimumEnv() {
   process.env.SOLANA_PRIVATE_KEY = base58Key;
   process.env.ANTHROPIC_API_KEY = "test-api-key";
   process.env.VAULT_TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-  process.env.LULO_PROGRAM_ID = "3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm";
+  process.env.LULO_PROGRAM_ID = "DUECqnJ77fP2Kd9SqeTsVc9n7MiTaBvSW3mREM8DuBVs";
   process.env.LULO_TREASURY = "So11111111111111111111111111111111111111112";
   return { keypair, base58Key };
 }
@@ -73,7 +73,7 @@ describe("loadConfig", () => {
     expect(config.strategyId).toBe(0);
     expect(config.pollIntervalMs).toBe(120000);       // 2 minutes
     expect(config.minLendAmount).toBe(1000000);       // 1 USDC (6 decimals)
-    expect(config.luloProgramId.toBase58()).toBe("3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm");
+    expect(config.luloProgramId.toBase58()).toBe("DUECqnJ77fP2Kd9SqeTsVc9n7MiTaBvSW3mREM8DuBVs");
     expect(config.luloTreasury.toBase58()).toBe("So11111111111111111111111111111111111111112");
     expect(config.maxRetries).toBe(3);
     expect(config.retryDelayMs).toBe(2000);           // 2 seconds
