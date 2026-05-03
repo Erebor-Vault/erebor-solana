@@ -122,7 +122,7 @@ pub enum VaultError {
     #[msg("AutoActionConfig ix_data exceeds the 256-byte cap")]
     AutoActionDataTooLarge,
 
-    #[msg("ValueSource kind must be 0 (SplAtaBalance) or 1 (AccountU64)")]
+    #[msg("ValueSource kind must be 0 (SplAtaBalance), 1 (AccountU64), or 2 (PythPriceFeed)")]
     InvalidValueSourceKind,
 
     #[msg("ValueSource index exceeds MAX_VALUE_SOURCES_PER_STRATEGY")]
@@ -145,4 +145,19 @@ pub enum VaultError {
 
     #[msg("Cumulative fan-out from a single deposit cannot exceed the deposit amount")]
     FanOutExceedsDeposit,
+
+    #[msg("Pyth price feed is stale: now - publish_time exceeds max_staleness_secs")]
+    ValueSourcePythStale,
+
+    #[msg("Pyth price feed reported a negative price")]
+    ValueSourcePythNegativePrice,
+
+    #[msg("PythPriceFeed.mint_balance_source_index is out of range or self-referential")]
+    ValueSourcePythBadIndex,
+
+    #[msg("PythPriceFeed.mint_balance_source_index does not resolve to a present ValueSource in remaining_accounts")]
+    ValueSourcePythBalanceSourceMissing,
+
+    #[msg("PythPriceFeed.mint_balance_source_index must point at an SplAtaBalance source, not another PythPriceFeed or AccountU64")]
+    ValueSourcePythBalanceKindMismatch,
 }
