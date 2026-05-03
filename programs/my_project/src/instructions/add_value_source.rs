@@ -47,16 +47,32 @@ pub fn handler(
     offset: u32,
     scale_num: u64,
     scale_den: u64,
+    mint_balance_source_index: u8,
+    max_staleness_secs: u32,
 ) -> Result<()> {
     require!(
         index < MAX_VALUE_SOURCES_PER_STRATEGY,
         VaultError::ValueSourceIndexOutOfBounds
     );
     require!(
-        kind == VALUE_SOURCE_KIND_SPL_ATA_BALANCE || kind == VALUE_SOURCE_KIND_ACCOUNT_U64,
+        kind == VALUE_SOURCE_KIND_SPL_ATA_BALANCE
+            || kind == VALUE_SOURCE_KIND_ACCOUNT_U64
+            || kind == VALUE_SOURCE_KIND_PYTH_PRICE_FEED,
         VaultError::InvalidValueSourceKind
     );
     require!(scale_den > 0, VaultError::InvalidValueSourceScale);
+
+    if kind == VALUE_SOURCE_KIND_PYTH_PRICE_FEED {
+        require!(
+            mint_balance_source_index < MAX_VALUE_SOURCES_PER_STRATEGY
+                && mint_balance_source_index != index,
+            VaultError::ValueSourcePythBadIndex
+        );
+        require!(
+            max_staleness_secs > 0,
+            VaultError::ValueSourcePythStale
+        );
+    }
 
     let vs = &mut ctx.accounts.value_source;
     vs.vault = ctx.accounts.vault_state.key();
@@ -69,7 +85,9 @@ pub fn handler(
     vs.scale_num = scale_num;
     vs.scale_den = scale_den;
     vs.bump = ctx.bumps.value_source;
-    vs._reserved = [0; 32];
+    vs.mint_balance_source_index = mint_balance_source_index;
+    vs.max_staleness_secs = max_staleness_secs;
+    vs._reserved = [0; 27];
 
     emit!(ValueSourceAdded {
         vault: ctx.accounts.vault_state.key(),
@@ -81,6 +99,8 @@ pub fn handler(
         offset,
         scale_num,
         scale_den,
+        mint_balance_source_index,
+        max_staleness_secs,
     });
     Ok(())
 }

@@ -286,9 +286,12 @@ pub mod my_project {
 
     /// Admin-only. Registers a `ValueSource` slot for a strategy. `kind`
     /// 0 = SplAtaBalance (read u64 at offset 64..72 of `target_account`);
-    /// 1 = AccountU64 (read u64 at `offset..offset+8`). The raw read is
-    /// scaled by `scale_num/scale_den` to convert into underlying-token
-    /// units (e.g. cToken → underlying via the protocol's exchange rate).
+    /// 1 = AccountU64 (read u64 at `offset..offset+8`); 2 = PythPriceFeed
+    /// (read price/expo/publish_time at canonical Pyth offsets, multiply
+    /// by balance from sibling SplAtaBalance source at
+    /// `mint_balance_source_index`). Raw read scaled by
+    /// `scale_num/scale_den` (both default to 1). Pyth path reverts if
+    /// stale (`now - publish_time > max_staleness_secs`) or price < 0.
     pub fn add_value_source(
         ctx: Context<AddValueSource>,
         strategy_id: u64,
@@ -298,6 +301,8 @@ pub mod my_project {
         offset: u32,
         scale_num: u64,
         scale_den: u64,
+        mint_balance_source_index: u8,
+        max_staleness_secs: u32,
     ) -> Result<()> {
         instructions::add_value_source::handler(
             ctx,
@@ -308,6 +313,8 @@ pub mod my_project {
             offset,
             scale_num,
             scale_den,
+            mint_balance_source_index,
+            max_staleness_secs,
         )
     }
 
