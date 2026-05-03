@@ -74,6 +74,57 @@ Not started. When user signals go-time:
 9. Update `app/src/lib/constants.ts` to point at mainnet program +
    mints. Build + deploy frontend.
 
+### A4. Mainnet wiring for strategy-config presets
+
+Tracks the spec at
+[superpowers/specs/2026-05-03-strategy-config-presets-design.md](superpowers/specs/2026-05-03-strategy-config-presets-design.md).
+The presets ship against in-workspace mocks on devnet
+(`mock_kamino`, `mock_lulo`, `mock_pyth`); the items below are what
+the same code needs in order to run against mainnet.
+
+1. **Fill the mainnet half of `PROTOCOL_REGISTRY`**
+   ([app/src/lib/strategy-presets/registry.ts](../app/src/lib/strategy-presets/registry.ts)).
+   For each protocol, supply:
+   - Program ID — Kamino Lend `KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD`,
+     Kamino Vaults, Lulo, Jupiter v6 `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`,
+     Raydium CLMM, Raydium AMM v4.
+   - Discriminators for `deposit` / `withdraw` / `borrow` / `repay` /
+     `swap`. Verify against each protocol's published IDL — do not
+     copy from mocks.
+   - `valueSource` descriptor (`accountResolver`, `offset`,
+     `scaleNum`/`scaleDen`) per protocol. The cToken / position
+     account offsets must be re-derived from the live IDL; do not
+     reuse mock offsets.
+2. **Fill `priceFeeds` with real Pyth accounts**, one per mint in
+   the curator's `AllowedToken` set. Pyth Solana publisher list:
+   https://pyth.network/developers/price-feed-ids . Use the
+   permissionless v2 program ID; max staleness in the preset stays
+   at 60 s — verify it's safe for the asset volatility profile and
+   raise/lower per mint if needed.
+3. **Decide whether to deploy `mock_pyth` to mainnet.** It should
+   not be deployed. The on-chain `PythPriceFeed` reader is
+   wire-compatible with real Pyth; mainnet flips `priceFeeds` to
+   real feed addresses and that's it. Confirm `mock_pyth` is gated
+   out of `Anchor.toml`'s mainnet deploy list before
+   `bash scripts/deploy.sh`.
+4. **Audit scope addition.** The new `PythPriceFeed` `ValueSource`
+   variant is the only on-chain change introduced by the preset
+   work. Hand the auditor:
+   - The Pyth wire-format reader (offsets, staleness check, expo
+     handling, balance × price math, overflow guards on the i64×u64
+     multiply).
+   - The `mint_balance_source_index` indirection (must not be able
+     to point at another `PythPriceFeed` and recurse, must reject
+     out-of-range indices, must reject indices whose source kind
+     isn't `SplAtaBalance`).
+5. **Sunset `crank-mock-prices.ts` on mainnet.** The keeper exists
+   only to feed `mock_pyth`. Remove from any production cron;
+   keep in-repo for devnet use.
+6. **Re-run `anchor build` after the IDL change** so
+   [app/src/idl/my_project.ts](../app/src/idl/my_project.ts) picks
+   up the new `ValueSource` variant. Frontend will fail at type-check
+   otherwise.
+
 ---
 
 ## B. Adapter ecosystem (Phase 4c follow-on, TS only — no program upgrades)
