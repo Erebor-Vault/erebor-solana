@@ -4,9 +4,10 @@
 
 | Program       | Program ID                                        | Notes                                  |
 | ------------- | ------------------------------------------------- | -------------------------------------- |
-| `my_project`  | `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`    | Vault, Phase-1–3 hardening + Phase-4a/b/d. Anchor 0.32.1, Rust 1.89.0 |
+| `my_project`  | `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`    | Vault, Phase-1–3 hardening + Phase-4a/b/d + Phase-5/5b (`PythPriceFeed` ValueSource). Anchor 0.32.1, Rust 1.89.0 |
 | `mock_kamino` | `H4tUCeXMQduSmB6fjqbYMdFb49E8YnEHku5NWFrWKaGU`    | cToken model + obligations/borrow/repay |
 | `mock_lulo`   | `DUECqnJ77fP2Kd9SqeTsVc9n7MiTaBvSW3mREM8DuBVs`    | Treasury + per-strategy ProtocolPosition |
+| `mock_pyth`   | `2AnSsnWA2W64aAtBEHtouJkotTqXwTSEEvDPfa4YURoq`    | Pyth-style price feed (`MockPriceFeed` PDA seeded `[b"price", mint]`); devnet/localnet only |
 
 | Stale program ID                                | Replaced by / status                              |
 | ----------------------------------------------- | ------------------------------------------------- |
@@ -15,6 +16,40 @@
 | `B7EUo8ipi5xNuTtjbrG6enXymac1bD4b6NijYAEFB45z` | **Closed** 2026-05-02; ID burnt by Solana loader. Replaced by `FuAJhy…`. ~4.95 SOL rent reclaimed. |
 | `S4taBhfvbCEKkGYvD9ESwiEEKHgnZmCusLXE47vzhoK` | **Closed** 2026-05-02; ID burnt. Replaced by `H4tUCe…`. ~2.68 SOL reclaimed. |
 | `3YSjEZC92TJs9zJsYDa1qyeRVBXBUtnwSze2iyCB7Ydm` | **Closed** 2026-05-02; ID burnt. Replaced by `DUECqn…`. ~1.93 SOL reclaimed. |
+
+## Phase-5b deploy (2026-05-03) — `my_project` upgrade + `mock_pyth` fresh deploy
+
+Plan 1 of the strategy-config-presets work
+([spec](superpowers/specs/2026-05-03-strategy-config-presets-design.md),
+[plan](superpowers/plans/2026-05-03-plan-1-pyth-value-source-and-mock-pyth.md))
+shipped a new `ValueSource` variant `PythPriceFeed` and a companion
+`mock_pyth` program that produces price accounts in a Pyth-compatible
+wire layout (price/expo/publish_time at offsets 8/16/20 after the
+8-byte Anchor disc).
+
+| Program       | Action                                | Tx signature                                                                                                            | Schema impact |
+| ------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `my_project`  | **Upgrade in place**                  | (in `anchor deploy` output — IDL upgraded at `BXd4T37ekJ9BF6mBc3sWStp3nbsAyQSqDACKA2Dx5BAi`)                             | Additive: new `kind = 2` (PythPriceFeed) + 5 B carved out of `ValueSource._reserved` for `mint_balance_source_index: u8` + `max_staleness_secs: u32`. `add_value_source` now takes 9 args (was 7); existing accounts deserialise unchanged because the new bytes were already zero in `_reserved`. |
+| `mock_pyth`   | **Fresh deploy** at `2AnSsnW…URoq`    | [`5yaSN9u7…`](https://explorer.solana.com/tx/5yaSN9u7KcMmmVUEL4MvbGLMT2gr4buxWLL99MPfGJdecwqQ5SXTwEcsNZAxKQGYE11e4VnFzM54zLRwxLDpPfVt?cluster=devnet) | New program; IDL at `A4yHRmHHcyJpFue39YZg2BfSguukiFKf8Bsx7Tovfgr6`. |
+
+Authority on both programs: `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn` (deployer wallet, same as Phase-1–3 redeploy).
+
+**SOL impact:** ~1.4 SOL net (deployer 14.98 → 13.57). The `my_project`
+upgrade was effectively free — new `.so` (878,864 B) is smaller than
+the existing program data allocation (901,800 B), so no extra rent.
+`mock_pyth` paid ~1.4 SOL for a 199,360 B program account + buffer.
+
+**Mainnet posture:** `mock_pyth` is gated out of mainnet via
+[scripts/deploy.sh](../scripts/deploy.sh) (`anchor deploy` is restricted
+to `--program-name my_project` when `CLUSTER = mainnet`). The
+`my_project` upgrade itself is mainnet-safe in principle (additive,
+backwards-compatible); the live mainnet flip is tracked under
+[FOLLOWUPS.md A4](FOLLOWUPS.md#a4-mainnet-wiring-for-strategy-config-presets).
+
+**Pre-existing devnet state:** unaffected. Round-7 vaults + their
+strategies + already-registered `ValueSource` accounts continue to
+work — the two new fields are zero in pre-existing accounts and the
+two existing kinds (`SplAtaBalance`, `AccountU64`) ignore them.
 
 ## Phase-1–3 redeploy (2026-05-02) — close + fresh deploy under new IDs
 
