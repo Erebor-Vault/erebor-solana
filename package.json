@@ -4,7 +4,9 @@
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
     "deploy:devnet": "./scripts/deploy.sh devnet",
-    "deploy:mainnet": "./scripts/deploy.sh mainnet"
+    "deploy:mainnet": "./scripts/deploy.sh mainnet",
+    "crank:prices": "bun scripts/crank-mock-prices.ts --cluster devnet",
+    "crank:prices:loop": "bun scripts/crank-mock-prices.ts --cluster devnet --loop 60"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
