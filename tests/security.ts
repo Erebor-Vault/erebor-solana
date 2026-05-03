@@ -1749,6 +1749,8 @@ describe("my_project — phase-3 security", () => {
           0, // offset (ignored for SplAtaBalance)
           new BN(1), // scale_num
           new BN(1), // scale_den
+          0, // mint_balance_source_index (unused for non-Pyth)
+          0, // max_staleness_secs (unused for non-Pyth)
         )
         .accountsStrict({
           admin: payer.publicKey,
@@ -1817,6 +1819,8 @@ describe("my_project — phase-3 security", () => {
           0,
           new BN(1),
           new BN(1),
+          0, // mint_balance_source_index
+          0, // max_staleness_secs
         )
         .accountsStrict({
           admin: payer.publicKey,
@@ -1862,7 +1866,7 @@ describe("my_project — phase-3 security", () => {
       const oobPda = deriveValueSource(s0.strategy, 200);
       try {
         await program.methods
-          .addValueSource(new BN(0), 200, 0, Keypair.generate().publicKey, 0, new BN(1), new BN(1))
+          .addValueSource(new BN(0), 200, 0, Keypair.generate().publicKey, 0, new BN(1), new BN(1), 0, 0)
           .accountsStrict({
             admin: payer.publicKey,
             vaultState: fx.vault.vaultState,
@@ -1881,7 +1885,7 @@ describe("my_project — phase-3 security", () => {
       const badKindPda = deriveValueSource(s0.strategy, 1);
       try {
         await program.methods
-          .addValueSource(new BN(0), 1, 7, Keypair.generate().publicKey, 0, new BN(1), new BN(1))
+          .addValueSource(new BN(0), 1, 7, Keypair.generate().publicKey, 0, new BN(1), new BN(1), 0, 0)
           .accountsStrict({
             admin: payer.publicKey,
             vaultState: fx.vault.vaultState,
@@ -1920,6 +1924,8 @@ describe("my_project — phase-3 security", () => {
             0,
             new BN(1),
             new BN(1),
+            0, // mint_balance_source_index
+            0, // max_staleness_secs
           )
           .accountsStrict({
             admin: stranger.publicKey,
@@ -1957,6 +1963,8 @@ describe("my_project — phase-3 security", () => {
             0,
             new BN(1),
             new BN(0), // scale_den = 0 → invalid
+            0, // mint_balance_source_index
+            0, // max_staleness_secs
           )
           .accountsStrict({
             admin: payer.publicKey,
@@ -2060,7 +2068,7 @@ describe("my_project — phase-3 security", () => {
 
       const vsPda = deriveValueSource(s0.strategy, 0);
       await program.methods
-        .addValueSource(new BN(0), 0, 0, externalPosition.address, 0, new BN(1), new BN(1))
+        .addValueSource(new BN(0), 0, 0, externalPosition.address, 0, new BN(1), new BN(1), 0, 0)
         .accountsStrict({
           admin: payer.publicKey,
           vaultState: fx.vault.vaultState,
@@ -2134,6 +2142,8 @@ describe("my_project — phase-3 security", () => {
           64, // offset
           new BN(1),
           new BN(1),
+          0, // mint_balance_source_index
+          0, // max_staleness_secs
         )
         .accountsStrict({
           admin: payer.publicKey,
