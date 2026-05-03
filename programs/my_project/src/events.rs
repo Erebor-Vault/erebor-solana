@@ -264,6 +264,8 @@ pub struct ValueSourceAdded {
     pub offset: u32,
     pub scale_num: u64,
     pub scale_den: u64,
+    pub mint_balance_source_index: u8,
+    pub max_staleness_secs: u32,
 }
 
 #[event]
