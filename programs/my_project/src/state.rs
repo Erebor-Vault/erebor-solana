@@ -106,16 +106,19 @@ pub struct VaultAllowedToken {
     pub _reserved: [u8; 32],
 }
 
-/// Phase-5: per-strategy value-source registry entry. A strategy can have
-/// up to `MAX_VALUE_SOURCES_PER_STRATEGY` sources; the live value of the
-/// strategy is the sum across them. Source kinds:
-///   - kind = 0 (SplAtaBalance): read the SPL Token Account `amount` at
-///     offset 64..72 of `target_account.data`. `offset` is ignored.
-///   - kind = 1 (AccountU64): read the u64 at `target_account.data[offset..offset+8]`.
+/// Phase-5/5b: per-strategy value-source registry entry. A strategy can
+/// have up to `MAX_VALUE_SOURCES_PER_STRATEGY` sources; the live value of
+/// the strategy is the sum across them. Source kinds:
+///   - 0 (SplAtaBalance): read SPL Token Account `amount` at offset 64..72.
+///   - 1 (AccountU64): read u64 at `target_account.data[offset..offset+8]`.
+///   - 2 (PythPriceFeed): read price/expo/publish_time at the canonical
+///     `PYTH_*_OFFSET` constants from `target_account`; multiply by the
+///     balance from the `SplAtaBalance` source at
+///     `mint_balance_source_index`. Reverts if `now - publish_time >
+///     max_staleness_secs` or if `price < 0`.
 ///
-/// `scale_num / scale_den` is then applied to convert the raw read into
-/// underlying-token units (e.g. cToken → underlying via the protocol's
-/// exchange rate). Both default to 1.
+/// `scale_num / scale_den` is applied to convert the raw read into
+/// underlying-token units; both default to 1.
 #[account]
 #[derive(InitSpace)]
 pub struct ValueSource {
@@ -124,15 +127,23 @@ pub struct ValueSource {
     pub strategy_id: u64,
     /// Per-strategy slot index, 0..MAX_VALUE_SOURCES_PER_STRATEGY-1.
     pub index: u8,
-    /// 0 = SplAtaBalance, 1 = AccountU64.
+    /// 0 = SplAtaBalance, 1 = AccountU64, 2 = PythPriceFeed.
     pub kind: u8,
     pub target_account: Pubkey,
-    /// Byte offset for `AccountU64`. Ignored for `SplAtaBalance`.
+    /// Byte offset for `AccountU64`. Ignored for `SplAtaBalance` and
+    /// `PythPriceFeed`.
     pub offset: u32,
     pub scale_num: u64,
     pub scale_den: u64,
     pub bump: u8,
-    pub _reserved: [u8; 32],
+    /// Phase-5b: only meaningful for `PythPriceFeed`. Index of the
+    /// sibling `SplAtaBalance` ValueSource whose balance gets multiplied
+    /// by this feed's price. Ignored for other kinds.
+    pub mint_balance_source_index: u8,
+    /// Phase-5b: only meaningful for `PythPriceFeed`. Reverts if
+    /// `now - publish_time > max_staleness_secs`. Ignored for other kinds.
+    pub max_staleness_secs: u32,
+    pub _reserved: [u8; 27],
 }
 
 /// Phase-5: declarative "what should this strategy do when funds enter
