@@ -45,3 +45,16 @@ pub const SPL_TOKEN_AMOUNT_OFFSET: usize = 64;
 /// Solana caps a single transaction at 64 instructions; used as the
 /// upper bound for the sibling-instruction introspection loop.
 pub const MAX_INSTRUCTIONS_PER_TX: usize = 64;
+
+/// Phase-5b: third `ValueSource.kind` byte. Reads price from a Pyth-style
+/// price account and multiplies by an SPL balance read from a sibling
+/// `SplAtaBalance` ValueSource at `mint_balance_source_index`.
+pub const VALUE_SOURCE_KIND_PYTH_PRICE_FEED: u8 = 2;
+
+/// Byte offsets inside a `mock_pyth::MockPriceFeed` account (and any
+/// future Pyth-compatible feed wired in via FOLLOWUPS A4).
+pub const PYTH_PRICE_OFFSET: usize = 8;
+pub const PYTH_EXPO_OFFSET: usize = 16;
+pub const PYTH_PUBLISH_TIME_OFFSET: usize = 20;
+/// Last byte the reader touches; account data must be at least this long.
+pub const PYTH_MIN_ACCOUNT_LEN: usize = PYTH_PUBLISH_TIME_OFFSET + 8;
