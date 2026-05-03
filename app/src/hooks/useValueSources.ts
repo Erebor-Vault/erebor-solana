@@ -131,7 +131,9 @@ export function useValueSources(
             params.targetAccount,
             params.offset,
             params.scaleNum,
-            params.scaleDen
+            params.scaleDen,
+            0, // mintBalanceSourceIndex (only used for Pyth)
+            0  // maxStalenessSecs (only used for Pyth)
           )
           .accountsStrict({
             admin: wallet.publicKey,

@@ -231,7 +231,7 @@ export function ApyHistoryChart() {
                   borderRadius: 8,
                   fontSize: 12,
                 }}
-                formatter={(v: number) => [`${v}%`, "APY"]}
+                formatter={(v) => [`${v}%`, "APY"]}
               />
               <Area
                 type="monotone"

@@ -356,9 +356,12 @@ export type MyProject = {
       "docs": [
         "Admin-only. Registers a `ValueSource` slot for a strategy. `kind`",
         "0 = SplAtaBalance (read u64 at offset 64..72 of `target_account`);",
-        "1 = AccountU64 (read u64 at `offset..offset+8`). The raw read is",
-        "scaled by `scale_num/scale_den` to convert into underlying-token",
-        "units (e.g. cToken → underlying via the protocol's exchange rate)."
+        "1 = AccountU64 (read u64 at `offset..offset+8`); 2 = PythPriceFeed",
+        "(read price/expo/publish_time at canonical Pyth offsets, multiply",
+        "by balance from sibling SplAtaBalance source at",
+        "`mint_balance_source_index`). Raw read scaled by",
+        "`scale_num/scale_den` (both default to 1). Pyth path reverts if",
+        "stale (`now - publish_time > max_staleness_secs`) or price < 0."
       ],
       "discriminator": [
         129,
@@ -468,6 +471,14 @@ export type MyProject = {
         {
           "name": "scaleDen",
           "type": "u64"
+        },
+        {
+          "name": "mintBalanceSourceIndex",
+          "type": "u8"
+        },
+        {
+          "name": "maxStalenessSecs",
+          "type": "u32"
         }
       ]
     },
@@ -4934,7 +4945,7 @@ export type MyProject = {
     {
       "code": 6040,
       "name": "invalidValueSourceKind",
-      "msg": "ValueSource kind must be 0 (SplAtaBalance) or 1 (AccountU64)"
+      "msg": "ValueSource kind must be 0 (SplAtaBalance), 1 (AccountU64), or 2 (PythPriceFeed)"
     },
     {
       "code": 6041,
@@ -4970,6 +4981,31 @@ export type MyProject = {
       "code": 6047,
       "name": "fanOutExceedsDeposit",
       "msg": "Cumulative fan-out from a single deposit cannot exceed the deposit amount"
+    },
+    {
+      "code": 6048,
+      "name": "valueSourcePythStale",
+      "msg": "Pyth price feed is stale: now - publish_time exceeds max_staleness_secs"
+    },
+    {
+      "code": 6049,
+      "name": "valueSourcePythNegativePrice",
+      "msg": "Pyth price feed reported a negative price"
+    },
+    {
+      "code": 6050,
+      "name": "valueSourcePythBadIndex",
+      "msg": "PythPriceFeed.mint_balance_source_index is out of range or self-referential"
+    },
+    {
+      "code": 6051,
+      "name": "valueSourcePythBalanceSourceMissing",
+      "msg": "PythPriceFeed.mint_balance_source_index does not resolve to a present ValueSource in remaining_accounts"
+    },
+    {
+      "code": 6052,
+      "name": "valueSourcePythBalanceKindMismatch",
+      "msg": "PythPriceFeed.mint_balance_source_index must point at an SplAtaBalance source, not another PythPriceFeed or AccountU64"
     }
   ],
   "types": [
@@ -5959,16 +5995,19 @@ export type MyProject = {
     {
       "name": "valueSource",
       "docs": [
-        "Phase-5: per-strategy value-source registry entry. A strategy can have",
-        "up to `MAX_VALUE_SOURCES_PER_STRATEGY` sources; the live value of the",
-        "strategy is the sum across them. Source kinds:",
-        "- kind = 0 (SplAtaBalance): read the SPL Token Account `amount` at",
-        "offset 64..72 of `target_account.data`. `offset` is ignored.",
-        "- kind = 1 (AccountU64): read the u64 at `target_account.data[offset..offset+8]`.",
+        "Phase-5/5b: per-strategy value-source registry entry. A strategy can",
+        "have up to `MAX_VALUE_SOURCES_PER_STRATEGY` sources; the live value of",
+        "the strategy is the sum across them. Source kinds:",
+        "- 0 (SplAtaBalance): read SPL Token Account `amount` at offset 64..72.",
+        "- 1 (AccountU64): read u64 at `target_account.data[offset..offset+8]`.",
+        "- 2 (PythPriceFeed): read price/expo/publish_time at the canonical",
+        "`PYTH_*_OFFSET` constants from `target_account`; multiply by the",
+        "balance from the `SplAtaBalance` source at",
+        "`mint_balance_source_index`. Reverts if `now - publish_time >",
+        "max_staleness_secs` or if `price < 0`.",
         "",
-        "`scale_num / scale_den` is then applied to convert the raw read into",
-        "underlying-token units (e.g. cToken → underlying via the protocol's",
-        "exchange rate). Both default to 1."
+        "`scale_num / scale_den` is applied to convert the raw read into",
+        "underlying-token units; both default to 1."
       ],
       "type": {
         "kind": "struct",
@@ -5995,7 +6034,7 @@ export type MyProject = {
           {
             "name": "kind",
             "docs": [
-              "0 = SplAtaBalance, 1 = AccountU64."
+              "0 = SplAtaBalance, 1 = AccountU64, 2 = PythPriceFeed."
             ],
             "type": "u8"
           },
@@ -6006,7 +6045,8 @@ export type MyProject = {
           {
             "name": "offset",
             "docs": [
-              "Byte offset for `AccountU64`. Ignored for `SplAtaBalance`."
+              "Byte offset for `AccountU64`. Ignored for `SplAtaBalance` and",
+              "`PythPriceFeed`."
             ],
             "type": "u32"
           },
@@ -6023,11 +6063,28 @@ export type MyProject = {
             "type": "u8"
           },
           {
+            "name": "mintBalanceSourceIndex",
+            "docs": [
+              "Phase-5b: only meaningful for `PythPriceFeed`. Index of the",
+              "sibling `SplAtaBalance` ValueSource whose balance gets multiplied",
+              "by this feed's price. Ignored for other kinds."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "maxStalenessSecs",
+            "docs": [
+              "Phase-5b: only meaningful for `PythPriceFeed`. Reverts if",
+              "`now - publish_time > max_staleness_secs`. Ignored for other kinds."
+            ],
+            "type": "u32"
+          },
+          {
             "name": "reserved",
             "type": {
               "array": [
                 "u8",
-                32
+                27
               ]
             }
           }
@@ -6074,6 +6131,14 @@ export type MyProject = {
           {
             "name": "scaleDen",
             "type": "u64"
+          },
+          {
+            "name": "mintBalanceSourceIndex",
+            "type": "u8"
+          },
+          {
+            "name": "maxStalenessSecs",
+            "type": "u32"
           }
         ]
       }
