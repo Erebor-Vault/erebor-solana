@@ -16,6 +16,7 @@
 | 4c | TS adapter framework + mockKamino + Redeem button |
 | 4d | Protocol-level token allow-list |
 | 5 | Value sources + NAV settle, AutoActionConfig, signed-delta rebalance, allowed-action loss caps + cooldown, sibling-instruction introspection, fan-out on deposit, `_reserved` cushions |
+| 5b | PythPriceFeed ValueSource + mock_pyth program (Plan 1 of strategy-presets) |
 
 Live program id: `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`.
 
@@ -75,6 +76,8 @@ Not started. When user signals go-time:
    mints. Build + deploy frontend.
 
 ### A4. Mainnet wiring for strategy-config presets
+
+**Status:** Plan 1 (on-chain `PythPriceFeed` + `mock_pyth`) shipped 2026-05-03; remaining items below are for Plans 2–3 + mainnet wiring.
 
 Tracks the spec at
 [superpowers/specs/2026-05-03-strategy-config-presets-design.md](superpowers/specs/2026-05-03-strategy-config-presets-design.md).
