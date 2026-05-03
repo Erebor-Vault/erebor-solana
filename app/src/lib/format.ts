@@ -16,15 +16,36 @@ export function formatTokenAmount(
   return value.toFixed(decimals > 2 ? 2 : decimals);
 }
 
-/** Format share price (ratio) */
+/**
+ * Underlying-per-share, accounting for the on-chain virtual-shares
+ * offset (VIRTUAL_SHARES = 1_000_000). Mirrors the redeem formula:
+ *   underlying = shares × (assets + 1) / (supply + VIRTUAL_SHARES)
+ * which means shares carry `decimals + 6` effective decimals.
+ */
+const VIRTUAL_SHARES_OFFSET = 6;
+
 export function formatSharePrice(
   totalDeposited: BN,
   shareSupply: BN,
   decimals: number = 6
 ): string {
-  if (shareSupply.isZero()) return "1.0000";
-  const price = totalDeposited.toNumber() / shareSupply.toNumber();
-  return price.toFixed(4);
+  const VIRTUAL_SHARES = new BN(10).pow(new BN(VIRTUAL_SHARES_OFFSET));
+  const supplyAdj = shareSupply.add(VIRTUAL_SHARES);
+  if (supplyAdj.isZero()) return "1.0000";
+  const num = totalDeposited.add(new BN(1));
+  // price = (assets + 1) / (supply + VIRTUAL_SHARES), in underlying-per-share-unit
+  // Multiply by VIRTUAL_SHARES to scale back to "underlying per virtual share"
+  const scaled =
+    num.mul(VIRTUAL_SHARES).toNumber() / supplyAdj.toNumber();
+  return scaled.toFixed(4);
+}
+
+/** Display a raw share-balance as a token-equivalent number (handles the +6 offset). */
+export function formatShareAmount(
+  shareBalance: BN | number,
+  underlyingDecimals: number = 6
+): string {
+  return formatTokenAmount(shareBalance, underlyingDecimals + VIRTUAL_SHARES_OFFSET);
 }
 
 /** Format percentage */

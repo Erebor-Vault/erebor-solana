@@ -318,6 +318,21 @@ Recharts donut with one slice for the reserve plus one per active
 strategy. Center overlay shows TVL; legend underneath shows per-slice
 percentages.
 
+### APY history chart
+
+[`ApyHistoryChart`](app/src/components/vault/ApyHistoryChart.tsx) —
+event-derived APY sparkline. Pulls the last ~200 program signatures,
+decodes `YieldReported` / `LossReported` / `StrategyValueSettled`
+events filtered to the active vault. Per event computes
+`apy = (signedDelta / principal) × (year / Δt-since-prev-event)`,
+then a 5-point rolling average smooths single-tx spikes. Empty state
+("Run the yield crank…") when no reports exist; single-event vaults
+render one flat point. No new infra — bound by the RPC's
+signature-history window, which is fine on devnet. For >~few days of
+mainnet history, front it with a small KV cache. Smoke test:
+`bun scripts/crank-yield.ts --loop 30` against a vault and the chart
+fills in within a minute.
+
 ### User position card
 
 [`UserPosition`](app/src/components/vault/UserPosition.tsx) —
@@ -545,9 +560,11 @@ End-to-end against devnet:
   headless-friendly; the unblock is a viem-style mocked connector
   using `Keypair.generate()` seeded with anvil-style funded accounts
   on a private validator.
-- **Indexer-backed analytics** — running APY, drawdown charts,
-  cumulative yield. Needs an indexer once a real vault has production
-  history.
+- **Indexer-backed analytics** — drawdown charts and cumulative yield
+  beyond the RPC signature-history window. Running APY ships today
+  via `ApyHistoryChart` (event-derived from the last ~200 sigs); an
+  indexer or KV cache is only needed once a real vault outgrows that
+  window.
 
 ---
 

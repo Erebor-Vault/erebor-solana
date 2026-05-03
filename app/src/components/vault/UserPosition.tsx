@@ -2,12 +2,12 @@
 
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useUserPosition } from "@/hooks/useUserPosition";
-import { formatTokenAmount } from "@/lib/format";
+import { formatTokenAmount, formatShareAmount } from "@/lib/format";
 import { useVault } from "@/components/providers/VaultProvider";
 
 export function UserPosition() {
   const { connected } = useWallet();
-  const { shareSupply } = useVault();
+  const { shareSupply, activeEntry } = useVault();
   const { shareBalance, estimatedValue, loading } = useUserPosition();
 
   if (!connected) {
@@ -40,7 +40,7 @@ export function UserPosition() {
         <div>
           <p className="text-xs text-[var(--color-text-muted)]">Shares</p>
           <p className="text-lg font-semibold">
-            {formatTokenAmount(shareBalance)}
+            {formatShareAmount(shareBalance, activeEntry.tokenDecimals)}
           </p>
         </div>
         <div>
@@ -48,8 +48,8 @@ export function UserPosition() {
             Estimated Value
           </p>
           <p className="text-lg font-semibold">
-            {formatTokenAmount(estimatedValue)}{" "}
-            <span className="text-xs text-[var(--color-text-muted)]">USDC</span>
+            {formatTokenAmount(estimatedValue, activeEntry.tokenDecimals)}{" "}
+            <span className="text-xs text-[var(--color-text-muted)]">{activeEntry.tokenSymbol}</span>
           </p>
         </div>
         <div>

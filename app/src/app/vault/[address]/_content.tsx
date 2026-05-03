@@ -9,9 +9,9 @@ import { UserPosition } from "@/components/vault/UserPosition";
 import { DepositForm } from "@/components/vault/DepositForm";
 import { WithdrawForm } from "@/components/vault/WithdrawForm";
 import { AllocationChart } from "@/components/admin/AllocationChart";
+import { ApyHistoryChart } from "@/components/vault/ApyHistoryChart";
 import { PausedBanner } from "@/components/vault/PausedBanner";
 import { PendingRoleBanner } from "@/components/vault/PendingRoleBanner";
-import { ActivityFeed } from "@/components/vault/ActivityFeed";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { truncateAddress } from "@/lib/format";
 
@@ -137,7 +137,7 @@ export function VaultDetailContent() {
         <AllocationChart />
       </div>
 
-      <ActivityFeed />
+      <ApyHistoryChart />
     </div>
   );
 }
