@@ -52,16 +52,61 @@ pub fn handler<'info>(
 
     let strategy_key = ctx.accounts.strategy.key();
     let strategy_ata_key = ctx.accounts.strategy.token_account;
+    let now = Clock::get()?.unix_timestamp;
 
-    // Start with the strategy ATA's idle balance — the part of the
-    // allocation that hasn't been deployed externally yet.
+    // Strategy ATA's idle balance — already-allocated funds not deployed
+    // externally yet.
     let mut total_value: u128 = ctx.accounts.strategy_token_account.amount as u128;
 
-    // Walk [value_source_pda, target_account] pairs.
+    // Pass 1: pre-scan all `SplAtaBalance` sources, caching their raw u64
+    // balance keyed by the VS `index`. Pyth sources in pass 2 read from
+    // this cache.
+    let mut balance_by_index: [Option<u64>; MAX_VALUE_SOURCES_PER_STRATEGY as usize] =
+        [None; MAX_VALUE_SOURCES_PER_STRATEGY as usize];
+
     for chunk in ctx.remaining_accounts.chunks_exact(2) {
         let vs_ai = &chunk[0];
         let target_ai = &chunk[1];
+        let Some(vs) = try_load_program_pda::<ValueSource>(vs_ai)? else {
+            continue;
+        };
+        if vs.kind != VALUE_SOURCE_KIND_SPL_ATA_BALANCE {
+            continue;
+        }
+        require!(vs.strategy == strategy_key, VaultError::AccountMismatch);
+        require!(
+            target_ai.key() == vs.target_account,
+            VaultError::ValueSourceTargetMismatch
+        );
+        require!(
+            vs.target_account != strategy_ata_key,
+            VaultError::ValueSourceTargetIsStrategyAta
+        );
+        let data = target_ai.try_borrow_data()?;
+        require!(
+            data.len() >= SPL_TOKEN_AMOUNT_OFFSET + 8,
+            VaultError::ValueSourceTargetTooSmall
+        );
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(&data[SPL_TOKEN_AMOUNT_OFFSET..SPL_TOKEN_AMOUNT_OFFSET + 8]);
+        balance_by_index[vs.index as usize] = Some(u64::from_le_bytes(buf));
 
+        // Also fold into total_value with its own scale.
+        let raw = u64::from_le_bytes(buf) as u128;
+        let contribution = raw
+            .checked_mul(vs.scale_num as u128)
+            .ok_or(VaultError::MathOverflow)?
+            .checked_div(vs.scale_den as u128)
+            .ok_or(VaultError::MathOverflow)?;
+        total_value = total_value
+            .checked_add(contribution)
+            .ok_or(VaultError::MathOverflow)?;
+    }
+
+    // Pass 2: evaluate AccountU64 + PythPriceFeed sources.
+    for chunk in ctx.remaining_accounts.chunks_exact(2) {
+        let vs_ai = &chunk[0];
+        let target_ai = &chunk[1];
         let Some(vs) = try_load_program_pda::<ValueSource>(vs_ai)? else {
             continue;
         };
@@ -70,36 +115,89 @@ pub fn handler<'info>(
             target_ai.key() == vs.target_account,
             VaultError::ValueSourceTargetMismatch
         );
-        // The strategy's own ATA is already counted via
-        // `strategy_token_account.amount` above; double-counting it via a
-        // VS pointing at the same account would inflate the settle.
         require!(
             vs.target_account != strategy_ata_key,
             VaultError::ValueSourceTargetIsStrategyAta
         );
 
-        let off: usize = match vs.kind {
-            VALUE_SOURCE_KIND_SPL_ATA_BALANCE => SPL_TOKEN_AMOUNT_OFFSET,
-            VALUE_SOURCE_KIND_ACCOUNT_U64 => vs.offset as usize,
+        let contribution: u128 = match vs.kind {
+            VALUE_SOURCE_KIND_SPL_ATA_BALANCE => continue, // already counted in pass 1
+            VALUE_SOURCE_KIND_ACCOUNT_U64 => {
+                let off = vs.offset as usize;
+                let data = target_ai.try_borrow_data()?;
+                require!(
+                    data.len() >= off.checked_add(8).ok_or(VaultError::MathOverflow)?,
+                    VaultError::ValueSourceTargetTooSmall
+                );
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&data[off..off + 8]);
+                let raw = u64::from_le_bytes(buf) as u128;
+                raw.checked_mul(vs.scale_num as u128)
+                    .ok_or(VaultError::MathOverflow)?
+                    .checked_div(vs.scale_den as u128)
+                    .ok_or(VaultError::MathOverflow)?
+            }
+            VALUE_SOURCE_KIND_PYTH_PRICE_FEED => {
+                // Resolve the sibling balance source.
+                require!(
+                    vs.mint_balance_source_index < MAX_VALUE_SOURCES_PER_STRATEGY
+                        && vs.mint_balance_source_index != vs.index,
+                    VaultError::ValueSourcePythBadIndex
+                );
+                let balance = balance_by_index[vs.mint_balance_source_index as usize]
+                    .ok_or(error!(VaultError::ValueSourcePythBalanceSourceMissing))?;
+
+                let data = target_ai.try_borrow_data()?;
+                require!(
+                    data.len() >= PYTH_MIN_ACCOUNT_LEN,
+                    VaultError::ValueSourceTargetTooSmall
+                );
+
+                let mut price_buf = [0u8; 8];
+                price_buf.copy_from_slice(&data[PYTH_PRICE_OFFSET..PYTH_PRICE_OFFSET + 8]);
+                let price = i64::from_le_bytes(price_buf);
+                require!(price >= 0, VaultError::ValueSourcePythNegativePrice);
+
+                let mut expo_buf = [0u8; 4];
+                expo_buf.copy_from_slice(&data[PYTH_EXPO_OFFSET..PYTH_EXPO_OFFSET + 4]);
+                let expo = i32::from_le_bytes(expo_buf);
+
+                let mut pt_buf = [0u8; 8];
+                pt_buf.copy_from_slice(
+                    &data[PYTH_PUBLISH_TIME_OFFSET..PYTH_PUBLISH_TIME_OFFSET + 8],
+                );
+                let publish_time = i64::from_le_bytes(pt_buf);
+
+                let age = now.checked_sub(publish_time).unwrap_or(i64::MAX);
+                require!(
+                    age >= 0 && (age as u64) <= vs.max_staleness_secs as u64,
+                    VaultError::ValueSourcePythStale
+                );
+
+                // contribution = balance × price × 10^expo, with scale.
+                let mut value: u128 = (balance as u128)
+                    .checked_mul(price as u128)
+                    .ok_or(VaultError::MathOverflow)?;
+                if expo < 0 {
+                    let factor = 10u128
+                        .checked_pow((-expo) as u32)
+                        .ok_or(VaultError::MathOverflow)?;
+                    value = value.checked_div(factor).ok_or(VaultError::MathOverflow)?;
+                } else if expo > 0 {
+                    let factor = 10u128
+                        .checked_pow(expo as u32)
+                        .ok_or(VaultError::MathOverflow)?;
+                    value = value.checked_mul(factor).ok_or(VaultError::MathOverflow)?;
+                }
+                value
+                    .checked_mul(vs.scale_num as u128)
+                    .ok_or(VaultError::MathOverflow)?
+                    .checked_div(vs.scale_den as u128)
+                    .ok_or(VaultError::MathOverflow)?
+            }
             _ => return err!(VaultError::InvalidValueSourceKind),
         };
 
-        let raw: u64 = {
-            let data = target_ai.try_borrow_data()?;
-            require!(
-                data.len() >= off.checked_add(8).ok_or(VaultError::MathOverflow)?,
-                VaultError::ValueSourceTargetTooSmall
-            );
-            let mut buf = [0u8; 8];
-            buf.copy_from_slice(&data[off..off + 8]);
-            u64::from_le_bytes(buf)
-        };
-
-        let contribution: u128 = (raw as u128)
-            .checked_mul(vs.scale_num as u128)
-            .ok_or(VaultError::MathOverflow)?
-            .checked_div(vs.scale_den as u128)
-            .ok_or(VaultError::MathOverflow)?;
         total_value = total_value
             .checked_add(contribution)
             .ok_or(VaultError::MathOverflow)?;
