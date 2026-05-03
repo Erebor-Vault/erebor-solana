@@ -172,10 +172,19 @@ info "Program size: $PROGRAM_SIZE"
 # -------------------------------------------------------------------
 info "Deploying to $CLUSTER ($RPC_URL)..."
 
-anchor deploy \
-  --provider.cluster "$ANCHOR_CLUSTER" \
-  --provider.wallet "$WALLET" \
-  2>&1
+if [ "$CLUSTER" = "mainnet" ]; then
+  info "Mainnet deploy: restricting to my_project only (mock_* programs are devnet-only)."
+  anchor deploy \
+    --program-name my_project \
+    --provider.cluster "$ANCHOR_CLUSTER" \
+    --provider.wallet "$WALLET" \
+    2>&1
+else
+  anchor deploy \
+    --provider.cluster "$ANCHOR_CLUSTER" \
+    --provider.wallet "$WALLET" \
+    2>&1
+fi
 
 # -------------------------------------------------------------------
 # Verify deployment
