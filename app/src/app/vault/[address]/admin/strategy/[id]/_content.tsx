@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { Keypair } from "@solana/web3.js";
 import { useVault } from "@/components/providers/VaultProvider";
 import { useRoles } from "@/hooks/useRoles";
 import { useStrategies } from "@/hooks/useStrategies";
@@ -13,12 +17,21 @@ import { WeightEditor } from "@/components/admin/strategy/WeightEditor";
 import { AuthorityActionsPanel } from "@/components/admin/strategy/AuthorityActionsPanel";
 import { DeactivateStrategyButton } from "@/components/admin/strategy/DeactivateStrategyButton";
 import { AllowedActionsEditor } from "@/components/admin/strategy/AllowedActionsEditor";
-import { VaultAllowedActionsProvider } from "@/hooks/useAllowedActions";
+import { VaultAllowedActionsProvider, useAllowedActions } from "@/hooks/useAllowedActions";
 import { ReportLossButton } from "@/components/admin/strategy/ReportLossButton";
 import { RedeemFromExternalButton } from "@/components/admin/strategy/RedeemFromExternalButton";
 import { AutoActionConfigEditor } from "@/components/admin/strategy/AutoActionConfigEditor";
 import { ValueSourceEditor } from "@/components/admin/strategy/ValueSourceEditor";
 import { truncateAddress } from "@/lib/format";
+import { useVaultProgram } from "@/hooks/useVaultProgram";
+import { useAutoActionConfigs } from "@/hooks/useAutoActionConfigs";
+import { useValueSources } from "@/hooks/useValueSources";
+import { getCluster } from "@/lib/constants";
+import { PRESETS, type PresetName } from "@/lib/strategy-presets/presets";
+import type { RowId, StrategySnapshot } from "@/lib/strategy-presets/diff";
+import { deriveStrategyTokenPda, deriveStrategyAuthorityPda } from "@/lib/pda";
+import { PresetLabel } from "@/components/admin/strategy/PresetLabel";
+import { ChangePresetModal } from "@/components/admin/strategy/ChangePresetModal";
 
 export function StrategyAdminContent() {
   return (
@@ -33,9 +46,101 @@ export function StrategyAdminContent() {
 function Inner() {
   const params = useParams<{ address: string; id: string }>();
   const idNum = Number(params?.id);
-  const { activeEntry, vaultPda, hasActiveVault } = useVault();
+  const { activeEntry, vaultPda, hasActiveVault, vault } = useVault();
   const { strategies, loading, refresh } = useStrategies();
   const roles = useRoles();
+
+  const strategy = strategies.find((s) => s.strategyId.toNumber() === idNum);
+
+  // --- Preset detection (same pattern as StrategyCard) ---
+  const { connection } = useConnection();
+  const wallet = useWallet();
+  const program = useVaultProgram();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const { rows: allowedActionRows } = useAllowedActions(strategy?.publicKey ?? null);
+  const { rows: autoActionRows } = useAutoActionConfigs(strategy?.publicKey ?? null, strategy?.strategyId ?? null);
+  const { rows: valueSourceRows } = useValueSources(strategy?.publicKey ?? null, strategy?.strategyId ?? null);
+
+  const snapshot = useMemo<StrategySnapshot>(
+    () => ({
+      allowedActions: allowedActionRows.map((r) => ({
+        targetProgram: r.targetProgram,
+        discriminator: r.discriminator,
+      })),
+      autoActions: autoActionRows.map((r) => ({ kind: r.kind as 0 | 1 })),
+      valueSources: valueSourceRows.map((r) => ({
+        index: r.index,
+        kind: r.kind as 0 | 1 | 2,
+      })),
+    }),
+    [allowedActionRows, autoActionRows, valueSourceRows]
+  );
+
+  const [presetRowsByName, setPresetRowsByName] = useState<Record<PresetName, RowId[]>>({
+    kamino_liquidity: [],
+    kamino_looper: [],
+    lulo_lending: [],
+    raydium_swapper: [],
+  });
+
+  const syntheticObligation = useRef(Keypair.generate().publicKey).current;
+  const strategyKeyStr = strategy?.publicKey.toBase58() ?? "";
+
+  useEffect(() => {
+    if (!strategy || !vault || !wallet.publicKey) return;
+    const strategyIdBn = strategy.strategyId;
+    const strategyIdNum = strategyIdBn.toNumber();
+    const strategyTokenAccount = deriveStrategyTokenPda(vaultPda, strategyIdNum);
+    const strategyAuthority = deriveStrategyAuthorityPda(vaultPda, strategyIdNum);
+    const ctx = {
+      connection,
+      program,
+      cluster: getCluster(),
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      vault: vaultPda,
+      strategyId: strategyIdBn,
+      strategy: strategy.publicKey,
+      strategyTokenAccount,
+      strategyAuthority,
+      underlyingDecimals: 6,
+      kaminoObligation: syntheticObligation,
+    };
+    let cancelled = false;
+    Promise.all(PRESETS.map((p) => p.buildRows(ctx).catch(() => [] as RowId[]))).then((rowsArr) => {
+      if (cancelled) return;
+      const byName: Record<PresetName, RowId[]> = {
+        kamino_liquidity: [],
+        kamino_looper: [],
+        lulo_lending: [],
+        raydium_swapper: [],
+      };
+      PRESETS.forEach((p, i) => { byName[p.name] = rowsArr[i]; });
+      setPresetRowsByName(byName);
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strategyKeyStr, vaultPda.toBase58()]);
+
+  const presetCtx = useMemo(() => {
+    if (!strategy || !wallet.publicKey) return null;
+    const strategyIdNum = strategy.strategyId.toNumber();
+    return {
+      connection,
+      program,
+      cluster: getCluster(),
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      vault: vaultPda,
+      strategyId: strategy.strategyId,
+      strategy: strategy.publicKey,
+      strategyTokenAccount: deriveStrategyTokenPda(vaultPda, strategyIdNum),
+      strategyAuthority: deriveStrategyAuthorityPda(vaultPda, strategyIdNum),
+      underlyingDecimals: 6,
+      kaminoObligation: syntheticObligation,
+    };
+  }, [wallet.publicKey, vaultPda, strategy, connection, program, syntheticObligation]);
 
   if (!hasActiveVault) {
     return <UnknownVault />;
@@ -49,8 +154,6 @@ function Inner() {
       </div>
     );
   }
-
-  const strategy = strategies.find((s) => s.strategyId.toNumber() === idNum);
 
   if (!strategy) {
     return (
@@ -106,6 +209,11 @@ function Inner() {
                 authority
               </span>
             ) : null}
+            <PresetLabel
+              snapshot={snapshot}
+              presetRowsByName={presetRowsByName}
+              onChangeClick={() => setModalOpen(true)}
+            />
           </div>
           <div className="mt-1 flex items-center gap-1.5">
             <span className="font-mono text-xs text-[var(--color-text-muted)]">
@@ -162,6 +270,17 @@ function Inner() {
           />
         </div>
       </div>
+
+      {/* Change-preset modal */}
+      {presetCtx && (
+        <ChangePresetModal
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          ctx={presetCtx}
+          snapshot={snapshot}
+          onApplied={refresh}
+        />
+      )}
     </div>
   );
 }
