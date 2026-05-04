@@ -6,7 +6,8 @@
     "deploy:devnet": "./scripts/deploy.sh devnet",
     "deploy:mainnet": "./scripts/deploy.sh mainnet",
     "crank:prices": "bun scripts/crank-mock-prices.ts --cluster devnet",
-    "crank:prices:loop": "bun scripts/crank-mock-prices.ts --cluster devnet --loop 60"
+    "crank:prices:loop": "bun scripts/crank-mock-prices.ts --cluster devnet --loop 60",
+    "init:mock-feeds": "bun scripts/init-mock-feeds.ts --cluster devnet"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
