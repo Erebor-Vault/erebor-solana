@@ -233,20 +233,26 @@ function Inner() {
         </div>
       ) : null}
 
-      {/* Action editors — compact 3-column row */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <AllowedActionsEditor strategy={strategy} />
-        <AutoActionConfigEditor strategy={strategy} />
-        <ValueSourceEditor strategy={strategy} />
-      </div>
-
-      {/* Strategy config + authority actions — bottom 2-column grid */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="space-y-6">
-          <CurrentConfigPanel strategy={strategy} />
+      {/*
+        Workshop-bench layout: editors get the wide left column where they
+        actually have room to render; metadata + small-form controls live
+        in a sticky rail on the right, grouped under brass eyebrows.
+      */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
+        {/* LEFT — editor stack */}
+        <div className="space-y-6 min-w-0">
+          <RailEyebrow>Inscriptions</RailEyebrow>
+          <AllowedActionsEditor strategy={strategy} />
+          <AutoActionConfigEditor strategy={strategy} />
+          <ValueSourceEditor strategy={strategy} />
         </div>
 
-        <div className="space-y-6">
+        {/* RIGHT — sticky workbench rail */}
+        <aside className="space-y-6 lg:sticky lg:top-4 lg:self-start min-w-0">
+          <RailEyebrow>Strategy metadata</RailEyebrow>
+          <CurrentConfigPanel strategy={strategy} />
+
+          <RailEyebrow>Curator controls</RailEyebrow>
           <DelegateEditor
             strategy={strategy}
             disabled={adminDisabled}
@@ -257,6 +263,8 @@ function Inner() {
             disabled={adminDisabled}
             onChanged={refresh}
           />
+
+          <RailEyebrow>Authority controls</RailEyebrow>
           <AuthorityActionsPanel
             strategy={strategy}
             disabled={authorityDisabled}
@@ -270,12 +278,23 @@ function Inner() {
             strategy={strategy}
             decimals={activeEntry.tokenDecimals}
           />
+
+          {/* Soft brass divider gates the destructive action below */}
+          <div
+            className="mx-1 h-px"
+            style={{
+              background:
+                "linear-gradient(90deg, transparent 0%, rgba(228,83,55,0.35) 50%, transparent 100%)",
+            }}
+            aria-hidden
+          />
+          <RailEyebrow tone="danger">Permanent</RailEyebrow>
           <DeactivateStrategyButton
             strategy={strategy}
             disabled={adminDisabled}
             onChanged={refresh}
           />
-        </div>
+        </aside>
       </div>
 
       {/* Change-preset modal */}
@@ -288,6 +307,37 @@ function Inner() {
           onApplied={refresh}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Brass-tracked eyebrow used to group the right rail sections. Matches
+ * the existing `eyebrow` utility class in globals.css. Tone "danger"
+ * flips brass → coal-red for the permanent-action gate.
+ */
+function RailEyebrow({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone?: "danger";
+}) {
+  const colorClass =
+    tone === "danger" ? "text-[var(--color-danger)]" : "text-[var(--color-accent-secondary)]";
+  return (
+    <div className={`flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] ${colorClass}`}>
+      <span aria-hidden>·</span>
+      <span>{children}</span>
+      <span
+        aria-hidden
+        className="ml-1 h-px flex-1"
+        style={{
+          background: tone === "danger"
+            ? "linear-gradient(90deg, rgba(228,83,55,0.35) 0%, transparent 100%)"
+            : "linear-gradient(90deg, rgba(212,162,74,0.4) 0%, transparent 100%)",
+        }}
+      />
     </div>
   );
 }
