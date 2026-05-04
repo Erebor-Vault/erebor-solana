@@ -30,8 +30,8 @@ import { getCluster } from "@/lib/constants";
 import { PRESETS, type PresetName } from "@/lib/strategy-presets/presets";
 import type { RowId, StrategySnapshot } from "@/lib/strategy-presets/diff";
 import { deriveStrategyTokenPda, deriveStrategyAuthorityPda } from "@/lib/pda";
-import { PresetLabel } from "@/components/admin/strategy/PresetLabel";
 import { ChangePresetModal } from "@/components/admin/strategy/ChangePresetModal";
+import { StrategyPresetCard } from "@/components/admin/strategy/StrategyPresetCard";
 
 export function StrategyAdminContent() {
   return (
@@ -209,11 +209,6 @@ function Inner() {
                 authority
               </span>
             ) : null}
-            <PresetLabel
-              snapshot={snapshot}
-              presetRowsByName={presetRowsByName}
-              onChangeClick={() => setModalOpen(true)}
-            />
           </div>
           <div className="mt-1 flex items-center gap-1.5">
             <span className="font-mono text-xs text-[var(--color-text-muted)]">
@@ -224,6 +219,13 @@ function Inner() {
         </div>
       </header>
 
+      {/* Prominent preset card — directly below the header */}
+      <StrategyPresetCard
+        snapshot={snapshot}
+        presetRowsByName={presetRowsByName}
+        onChangeClick={() => setModalOpen(true)}
+      />
+
       {!roles.isAdmin && !roles.isAuthority ? (
         <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-3 text-sm text-[var(--color-warning)]">
           Read-only view. The connected wallet has neither the admin nor the
@@ -231,15 +233,20 @@ function Inner() {
         </div>
       ) : null}
 
+      {/* Action editors — compact 3-column row */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <AllowedActionsEditor strategy={strategy} />
+        <AutoActionConfigEditor strategy={strategy} />
+        <ValueSourceEditor strategy={strategy} />
+      </div>
+
+      {/* Strategy config + authority actions — bottom 2-column grid */}
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-6">
-          <AllowedActionsEditor strategy={strategy} />
-          <AutoActionConfigEditor strategy={strategy} />
-          <ValueSourceEditor strategy={strategy} />
+          <CurrentConfigPanel strategy={strategy} />
         </div>
 
         <div className="space-y-6">
-          <CurrentConfigPanel strategy={strategy} />
           <DelegateEditor
             strategy={strategy}
             disabled={adminDisabled}
