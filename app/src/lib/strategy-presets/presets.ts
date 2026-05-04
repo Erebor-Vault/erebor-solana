@@ -21,6 +21,7 @@ import {
     clusterOrThrow,
 } from "./registry";
 import type { ClusterName, ProtocolName } from "./types";
+import type { RowId } from "./diff";
 
 export type PresetName =
     | "kamino_liquidity"
@@ -66,6 +67,8 @@ export interface StrategyPreset {
     summary: string;
     /** Compile to the full ix bundle for this strategy. */
     buildIxs: (ctx: PresetBuildContext) => Promise<TransactionInstruction[]>;
+    /** Row identifiers the preset would write — for diff + detection. */
+    buildRows: (ctx: PresetBuildContext) => Promise<RowId[]>;
 }
 
 const KAMINO_LIQUIDITY_LOSS_BPS = 100; // 1%
@@ -76,21 +79,240 @@ function disc(name: string): number[] {
     return Array.from(anchorDiscriminator(name));
 }
 
-/**
- * Helper: emit allowed-action ixs for a list of named ix discriminators
- * against a single target program.
- */
-async function allowedActionsForProtocol(
-    ctx: PresetBuildContext,
-    protocol: ProtocolName,
-    ixNames: string[],
-    opts: { lossPerCallBpsCap?: number; outputMintIndex?: number | null } = {},
-): Promise<TransactionInstruction[]> {
+// ============================================================
+// SHARED SPEC TYPES
+// ============================================================
+
+interface AllowedActionSpec {
+    targetProgram: PublicKey;
+    discriminator: number[];
+    lossPerCallBpsCap?: number;
+    outputMintIndex?: number | null;
+}
+
+interface AutoActionSpec {
+    kind: 0 | 1;
+    targetProgram: PublicKey;
+    discriminator: number[];
+    ixData: Buffer;
+}
+
+interface ValueSourceSpec {
+    index: number;
+    kind: 0 | 1 | 2;
+    targetAccount: PublicKey;
+    offset?: number;
+    scaleNum?: BN;
+    scaleDen?: BN;
+    mintBalanceSourceIndex?: number;
+    maxStalenessSecs?: number;
+}
+
+interface PresetBundleSpec {
+    allowedActions: AllowedActionSpec[];
+    autoActions: AutoActionSpec[];
+    valueSources: ValueSourceSpec[];
+}
+
+// ============================================================
+// KAMINO LIQUIDITY spec
+// ============================================================
+
+async function kaminoLiquiditySpec(ctx: PresetBuildContext): Promise<PresetBundleSpec> {
     const reg = PROTOCOL_REGISTRY[ctx.cluster];
-    const entry = reg.protocols[protocol];
-    if (!entry.programId) return []; // stubbed cluster — no-op, caller decides whether that's OK
+    const entry = reg.protocols.kamino;
+    if (!entry.programId) {
+        throw new Error(
+            `Kamino is not wired on ${ctx.cluster}. ${entry.note ?? ""}`,
+        );
+    }
+    if (!ctx.kaminoObligation) {
+        throw new Error(
+            "Kamino Liquidity preset requires `kaminoObligation` in PresetBuildContext. Paste the strategy's Kamino obligation pubkey before applying.",
+        );
+    }
+
+    const depositDisc = disc(entry.discriminators.deposit!);
+    const withdrawDisc = disc(entry.discriminators.withdraw!);
+
+    return {
+        allowedActions: [
+            {
+                targetProgram: entry.programId,
+                discriminator: depositDisc,
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+            {
+                targetProgram: entry.programId,
+                discriminator: withdrawDisc,
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+        ],
+        autoActions: [
+            {
+                kind: 0,
+                targetProgram: entry.programId,
+                discriminator: depositDisc,
+                ixData: Buffer.alloc(0),
+            },
+            {
+                kind: 1,
+                targetProgram: entry.programId,
+                discriminator: withdrawDisc,
+                ixData: Buffer.alloc(0),
+            },
+        ],
+        valueSources: [
+            {
+                index: 0,
+                kind: 1, // AccountU64
+                targetAccount: ctx.kaminoObligation,
+                offset: ctx.kaminoObligationOffset ?? 184,
+                scaleNum: new BN(1),
+                scaleDen: new BN(1),
+            },
+        ],
+    };
+}
+
+// ============================================================
+// RAYDIUM SWAPPER spec
+// ============================================================
+
+async function raydiumSwapperSpec(ctx: PresetBuildContext): Promise<PresetBundleSpec> {
+    const reg = PROTOCOL_REGISTRY[ctx.cluster];
+    const allowedActions: AllowedActionSpec[] = [];
+
+    for (const proto of ["raydium", "jupiter"] as const) {
+        const entry = reg.protocols[proto];
+        if (!entry.programId) continue;
+        allowedActions.push({
+            targetProgram: entry.programId,
+            discriminator: disc("swap"),
+            lossPerCallBpsCap: RAYDIUM_SWAP_LOSS_BPS,
+            outputMintIndex: 1,
+        });
+    }
+
+    const allowedMints = await getVaultAllowedTokens(
+        ctx.connection,
+        ctx.program.programId,
+        ctx.vault,
+    );
+    if (allowedMints.length === 0) {
+        throw new Error(
+            "Raydium Swapper preset requires at least one VaultAllowedToken on the vault.",
+        );
+    }
+    if (allowedMints.length > 8) {
+        throw new Error(
+            `Raydium Swapper preset can price up to 8 mints (got ${allowedMints.length}). Trim the vault allow-list or extend MAX_VALUE_SOURCES_PER_STRATEGY.`,
+        );
+    }
+    if (!reg.mockPythProgramId) {
+        throw new Error(
+            `Raydium Swapper preset needs a price-feed program; ${ctx.cluster} has no mockPythProgramId in PROTOCOL_REGISTRY.`,
+        );
+    }
+
+    const valueSources: ValueSourceSpec[] = [];
+    for (let i = 0; i < allowedMints.length; i++) {
+        const mint = allowedMints[i];
+        const ata = getAssociatedTokenAddressSync(
+            mint,
+            ctx.strategyAuthority,
+            true,
+        );
+        const [feedPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from("price"), mint.toBuffer()],
+            reg.mockPythProgramId,
+        );
+        const mintInfo = await getMint(ctx.connection, mint);
+        const expoMagnitude = 8;
+        const exponent = expoMagnitude + mintInfo.decimals - ctx.underlyingDecimals;
+        let scaleNum = new BN(1);
+        let scaleDen = new BN(1);
+        if (exponent >= 0) {
+            scaleDen = new BN(10).pow(new BN(exponent));
+        } else {
+            scaleNum = new BN(10).pow(new BN(-exponent));
+        }
+
+        const balanceVsIndex = i * 2;
+        const pythVsIndex = i * 2 + 1;
+        valueSources.push(
+            {
+                index: balanceVsIndex,
+                kind: 0, // SplAtaBalance
+                targetAccount: ata,
+            },
+            {
+                index: pythVsIndex,
+                kind: 2, // PythPriceFeed
+                targetAccount: feedPda,
+                scaleNum,
+                scaleDen,
+                mintBalanceSourceIndex: balanceVsIndex,
+                maxStalenessSecs: PYTH_MAX_STALENESS_SECS,
+            },
+        );
+    }
+
+    return { allowedActions, autoActions: [], valueSources };
+}
+
+// ============================================================
+// LULO LENDING spec
+// ============================================================
+
+async function luloLendingSpec(ctx: PresetBuildContext): Promise<PresetBundleSpec> {
+    const reg = PROTOCOL_REGISTRY[ctx.cluster];
+    const entry = reg.protocols.lulo;
+    if (!entry.programId) {
+        throw new Error(`Lulo is not wired on ${ctx.cluster}. ${entry.note ?? ""}`);
+    }
+
+    const depositDisc = disc(entry.discriminators.deposit!);
+    const withdrawDisc = disc(entry.discriminators.withdraw!);
+
+    return {
+        allowedActions: [
+            {
+                targetProgram: entry.programId,
+                discriminator: depositDisc,
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+            {
+                targetProgram: entry.programId,
+                discriminator: withdrawDisc,
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+        ],
+        autoActions: [
+            {
+                kind: 0,
+                targetProgram: entry.programId,
+                discriminator: depositDisc,
+                ixData: Buffer.alloc(0),
+            },
+            {
+                kind: 1,
+                targetProgram: entry.programId,
+                discriminator: withdrawDisc,
+                ixData: Buffer.alloc(0),
+            },
+        ],
+        valueSources: [],
+    };
+}
+
+// ============================================================
+// Spec → ixs + RowIds helpers
+// ============================================================
+
+async function specToIxs(ctx: PresetBuildContext, spec: PresetBundleSpec): Promise<TransactionInstruction[]> {
     const ixs: TransactionInstruction[] = [];
-    for (const ixName of ixNames) {
+    for (const aa of spec.allowedActions) {
         ixs.push(
             await buildAllowedActionIx({
                 program: ctx.program,
@@ -98,14 +320,66 @@ async function allowedActionsForProtocol(
                 vaultState: ctx.vaultState,
                 strategyId: ctx.strategyId,
                 strategy: ctx.strategy,
-                targetProgram: entry.programId,
-                discriminator: disc(ixName),
-                lossPerCallBpsCap: opts.lossPerCallBpsCap ?? KAMINO_LIQUIDITY_LOSS_BPS,
-                outputMintIndex: opts.outputMintIndex ?? null,
+                targetProgram: aa.targetProgram,
+                discriminator: aa.discriminator,
+                lossPerCallBpsCap: aa.lossPerCallBpsCap ?? KAMINO_LIQUIDITY_LOSS_BPS,
+                outputMintIndex: aa.outputMintIndex ?? null,
+            }),
+        );
+    }
+    for (const ac of spec.autoActions) {
+        ixs.push(
+            await buildAutoActionConfigIx({
+                program: ctx.program,
+                admin: ctx.admin,
+                vaultState: ctx.vaultState,
+                strategyId: ctx.strategyId,
+                strategy: ctx.strategy,
+                kind: ac.kind,
+                targetProgram: ac.targetProgram,
+                discriminator: ac.discriminator,
+                ixData: ac.ixData,
+            }),
+        );
+    }
+    for (const vs of spec.valueSources) {
+        ixs.push(
+            await buildValueSourceIx({
+                program: ctx.program,
+                admin: ctx.admin,
+                vaultState: ctx.vaultState,
+                strategyId: ctx.strategyId,
+                strategy: ctx.strategy,
+                index: vs.index,
+                kind: vs.kind,
+                targetAccount: vs.targetAccount,
+                offset: vs.offset,
+                scaleNum: vs.scaleNum,
+                scaleDen: vs.scaleDen,
+                mintBalanceSourceIndex: vs.mintBalanceSourceIndex,
+                maxStalenessSecs: vs.maxStalenessSecs,
             }),
         );
     }
     return ixs;
+}
+
+function specToRows(spec: PresetBundleSpec): RowId[] {
+    const rows: RowId[] = [];
+    for (const aa of spec.allowedActions) {
+        rows.push({
+            type: "allowed_action",
+            targetProgram: aa.targetProgram.toBase58(),
+            discriminator: Buffer.from(aa.discriminator).toString("hex"),
+        });
+    }
+    for (const ac of spec.autoActions) {
+        rows.push({ type: "auto_action", kind: ac.kind });
+    }
+    for (const vs of spec.valueSources) {
+        rows.push({ type: "value_source", index: vs.index });
+    }
+    return rows;
 }
 
 // ============================================================
@@ -117,75 +391,12 @@ export const KAMINO_LIQUIDITY: StrategyPreset = {
     label: "Kamino Liquidity",
     summary: "Deposit + withdraw against Kamino Lend; live NAV via reserve-collateral read.",
     async buildIxs(ctx) {
-        const reg = PROTOCOL_REGISTRY[ctx.cluster];
-        const entry = reg.protocols.kamino;
-        if (!entry.programId) {
-            throw new Error(
-                `Kamino is not wired on ${ctx.cluster}. ${entry.note ?? ""}`,
-            );
-        }
-        const ixs: TransactionInstruction[] = [];
-        ixs.push(
-            ...(await allowedActionsForProtocol(ctx, "kamino", [
-                entry.discriminators.deposit!,
-                entry.discriminators.withdraw!,
-            ])),
-        );
-        // Auto-action configs: deposit + withdraw. ix_data is empty —
-        // the agent fills in protocol-specific args at execute_action time.
-        ixs.push(
-            await buildAutoActionConfigIx({
-                program: ctx.program,
-                admin: ctx.admin,
-                vaultState: ctx.vaultState,
-                strategyId: ctx.strategyId,
-                strategy: ctx.strategy,
-                kind: 0,
-                targetProgram: entry.programId,
-                discriminator: disc(entry.discriminators.deposit!),
-                ixData: Buffer.alloc(0),
-            }),
-            await buildAutoActionConfigIx({
-                program: ctx.program,
-                admin: ctx.admin,
-                vaultState: ctx.vaultState,
-                strategyId: ctx.strategyId,
-                strategy: ctx.strategy,
-                kind: 1,
-                targetProgram: entry.programId,
-                discriminator: disc(entry.discriminators.withdraw!),
-                ixData: Buffer.alloc(0),
-            }),
-        );
-        // Value source #0: AccountU64 pointing at the Kamino obligation
-        // account, reading the cToken deposited_amount at the configured
-        // offset. The create form supplies `kaminoObligation` +
-        // `kaminoObligationOffset` (defaults to 184). Without them, the
-        // preset throws — the curator must paste the obligation pubkey.
-        if (!ctx.kaminoObligation) {
-            throw new Error(
-                "Kamino Liquidity preset requires `kaminoObligation` in PresetBuildContext. Paste the strategy's Kamino obligation pubkey before applying.",
-            );
-        }
-        ixs.push(
-            await buildValueSourceIx({
-                program: ctx.program,
-                admin: ctx.admin,
-                vaultState: ctx.vaultState,
-                strategyId: ctx.strategyId,
-                strategy: ctx.strategy,
-                index: 0,
-                kind: 1, // AccountU64
-                targetAccount: ctx.kaminoObligation,
-                offset: ctx.kaminoObligationOffset ?? 184,
-                // scale 1/1: cToken amount is reported pre-conversion;
-                // for a precise reserve-rate multiplier the curator
-                // edits this VS in the per-strategy editor afterwards.
-                scaleNum: new BN(1),
-                scaleDen: new BN(1),
-            }),
-        );
-        return ixs;
+        const spec = await kaminoLiquiditySpec(ctx);
+        return specToIxs(ctx, spec);
+    },
+    async buildRows(ctx) {
+        const spec = await kaminoLiquiditySpec(ctx);
+        return specToRows(spec);
     },
 };
 
@@ -198,17 +409,54 @@ export const KAMINO_LOOPER: StrategyPreset = {
     label: "Kamino Looper",
     summary: "Kamino Liquidity + borrow/repay (looped leverage).",
     async buildIxs(ctx) {
-        const ixs = await KAMINO_LIQUIDITY.buildIxs(ctx);
+        const baseSpec = await kaminoLiquiditySpec(ctx);
         const reg = PROTOCOL_REGISTRY[ctx.cluster];
         const entry = reg.protocols.kamino;
-        if (!entry.programId) return ixs; // base preset already threw if missing
-        ixs.push(
-            ...(await allowedActionsForProtocol(ctx, "kamino", [
-                entry.discriminators.borrow!,
-                entry.discriminators.repay!,
-            ])),
-        );
-        return ixs;
+        if (!entry.programId) {
+            return specToIxs(ctx, baseSpec);
+        }
+        const extraActions: AllowedActionSpec[] = [
+            {
+                targetProgram: entry.programId,
+                discriminator: disc(entry.discriminators.borrow!),
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+            {
+                targetProgram: entry.programId,
+                discriminator: disc(entry.discriminators.repay!),
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+        ];
+        const fullSpec: PresetBundleSpec = {
+            ...baseSpec,
+            allowedActions: [...baseSpec.allowedActions, ...extraActions],
+        };
+        return specToIxs(ctx, fullSpec);
+    },
+    async buildRows(ctx) {
+        const baseSpec = await kaminoLiquiditySpec(ctx);
+        const reg = PROTOCOL_REGISTRY[ctx.cluster];
+        const entry = reg.protocols.kamino;
+        if (!entry.programId) {
+            return specToRows(baseSpec);
+        }
+        const extraActions: AllowedActionSpec[] = [
+            {
+                targetProgram: entry.programId,
+                discriminator: disc(entry.discriminators.borrow!),
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+            {
+                targetProgram: entry.programId,
+                discriminator: disc(entry.discriminators.repay!),
+                lossPerCallBpsCap: KAMINO_LIQUIDITY_LOSS_BPS,
+            },
+        ];
+        const fullSpec: PresetBundleSpec = {
+            ...baseSpec,
+            allowedActions: [...baseSpec.allowedActions, ...extraActions],
+        };
+        return specToRows(fullSpec);
     },
 };
 
@@ -221,43 +469,12 @@ export const LULO_LENDING: StrategyPreset = {
     label: "Lulo Lending",
     summary: "Lend + redeem against Lulo; live NAV via position-account read.",
     async buildIxs(ctx) {
-        const reg = PROTOCOL_REGISTRY[ctx.cluster];
-        const entry = reg.protocols.lulo;
-        if (!entry.programId) {
-            throw new Error(`Lulo is not wired on ${ctx.cluster}. ${entry.note ?? ""}`);
-        }
-        const ixs: TransactionInstruction[] = [];
-        ixs.push(
-            ...(await allowedActionsForProtocol(ctx, "lulo", [
-                entry.discriminators.deposit!,
-                entry.discriminators.withdraw!,
-            ])),
-        );
-        ixs.push(
-            await buildAutoActionConfigIx({
-                program: ctx.program,
-                admin: ctx.admin,
-                vaultState: ctx.vaultState,
-                strategyId: ctx.strategyId,
-                strategy: ctx.strategy,
-                kind: 0,
-                targetProgram: entry.programId,
-                discriminator: disc(entry.discriminators.deposit!),
-                ixData: Buffer.alloc(0),
-            }),
-            await buildAutoActionConfigIx({
-                program: ctx.program,
-                admin: ctx.admin,
-                vaultState: ctx.vaultState,
-                strategyId: ctx.strategyId,
-                strategy: ctx.strategy,
-                kind: 1,
-                targetProgram: entry.programId,
-                discriminator: disc(entry.discriminators.withdraw!),
-                ixData: Buffer.alloc(0),
-            }),
-        );
-        return ixs;
+        const spec = await luloLendingSpec(ctx);
+        return specToIxs(ctx, spec);
+    },
+    async buildRows(ctx) {
+        const spec = await luloLendingSpec(ctx);
+        return specToRows(spec);
     },
 };
 
@@ -271,126 +488,12 @@ export const RAYDIUM_SWAPPER: StrategyPreset = {
     summary:
         "Swap among allow-listed mints (Raydium + Jupiter on mainnet). NAV from balance × Pyth price per allow-listed mint.",
     async buildIxs(ctx) {
-        const reg = PROTOCOL_REGISTRY[ctx.cluster];
-        const ixs: TransactionInstruction[] = [];
-        // Allowed actions: swap discriminators on Raydium + Jupiter (no-op
-        // on devnet because both stubbed; populated on mainnet via
-        // FOLLOWUPS A4).
-        for (const proto of ["raydium", "jupiter"] as const) {
-            const entry = reg.protocols[proto];
-            if (!entry.programId) continue;
-            // output_mint_index = 1 by Plan-3 convention: caller must place
-            // the output mint at remaining_accounts[1]. Curator can edit
-            // post-hoc via AllowedActionsEditor.
-            ixs.push(
-                ...(await allowedActionsForProtocol(ctx, proto, ["swap"], {
-                    lossPerCallBpsCap: RAYDIUM_SWAP_LOSS_BPS,
-                    outputMintIndex: 1,
-                })),
-            );
-        }
-
-        // Value sources: per allow-listed mint, register
-        //   [SplAtaBalance, PythPriceFeed]
-        // pair. Each pair takes 2 VS slots. With MAX_VALUE_SOURCES = 16,
-        // up to 8 mints can be priced in. Preset throws if the vault has
-        // more allow-listed mints than fit.
-        const allowedMints = await getVaultAllowedTokens(
-            ctx.connection,
-            ctx.program.programId,
-            ctx.vault,
-        );
-        if (allowedMints.length === 0) {
-            throw new Error(
-                "Raydium Swapper preset requires at least one VaultAllowedToken on the vault.",
-            );
-        }
-        if (allowedMints.length > 8) {
-            throw new Error(
-                `Raydium Swapper preset can price up to 8 mints (got ${allowedMints.length}). Trim the vault allow-list or extend MAX_VALUE_SOURCES_PER_STRATEGY.`,
-            );
-        }
-        if (!reg.mockPythProgramId) {
-            throw new Error(
-                `Raydium Swapper preset needs a price-feed program; ${ctx.cluster} has no mockPythProgramId in PROTOCOL_REGISTRY.`,
-            );
-        }
-
-        // Per-mint, derive the strategy's ATA + mock_pyth feed PDA, and
-        // fetch the priced mint's decimals so we can derive the right
-        // Pyth `scaleDen`. Note: the strategy ATA is NOT
-        // `strategy.token_account` (that's the underlying); these are
-        // satellite ATAs that the swap leg fills.
-        for (let i = 0; i < allowedMints.length; i++) {
-            const mint = allowedMints[i];
-            const ata = getAssociatedTokenAddressSync(
-                mint,
-                ctx.strategyAuthority,
-                true,
-            );
-            const [feedPda] = PublicKey.findProgramAddressSync(
-                [Buffer.from("price"), mint.toBuffer()],
-                reg.mockPythProgramId,
-            );
-            // Fetch the priced mint's decimals so the Pyth contribution
-            // lands in underlying-token base units regardless of the
-            // mint's decimals. Math:
-            //   contribution_underlying_base_units
-            //     = balance_in_mint_base_units
-            //       × price_int            (= usd × 10^|expo|)
-            //       × 10^expo              (applied by the on-chain reader)
-            //       × 10^underlyingDecimals
-            //       / 10^mintDecimals
-            //   For expo = -8: balance × price / 10^(8 + mintDecimals - underlyingDecimals).
-            // Everything except the final divisor is handled by the
-            // on-chain reader, so we set:
-            //   scaleNum = 1
-            //   scaleDen = 10^(8 + mintDecimals - underlyingDecimals)
-            // If underlyingDecimals > mintDecimals + 8, swap to
-            // scaleNum = 10^(underlyingDecimals - mintDecimals - 8),
-            // scaleDen = 1 — but that case is unusual (would need a
-            // 17-decimal underlying).
-            const mintInfo = await getMint(ctx.connection, mint);
-            const expoMagnitude = 8; // PYTH_MAX_STALENESS_SECS unrelated; expo is fixed by the keeper
-            const exponent = expoMagnitude + mintInfo.decimals - ctx.underlyingDecimals;
-            let scaleNum = new BN(1);
-            let scaleDen = new BN(1);
-            if (exponent >= 0) {
-                scaleDen = new BN(10).pow(new BN(exponent));
-            } else {
-                scaleNum = new BN(10).pow(new BN(-exponent));
-            }
-
-            const balanceVsIndex = i * 2;
-            const pythVsIndex = i * 2 + 1;
-            ixs.push(
-                await buildValueSourceIx({
-                    program: ctx.program,
-                    admin: ctx.admin,
-                    vaultState: ctx.vaultState,
-                    strategyId: ctx.strategyId,
-                    strategy: ctx.strategy,
-                    index: balanceVsIndex,
-                    kind: 0,
-                    targetAccount: ata,
-                }),
-                await buildValueSourceIx({
-                    program: ctx.program,
-                    admin: ctx.admin,
-                    vaultState: ctx.vaultState,
-                    strategyId: ctx.strategyId,
-                    strategy: ctx.strategy,
-                    index: pythVsIndex,
-                    kind: 2,
-                    targetAccount: feedPda,
-                    scaleNum,
-                    scaleDen,
-                    mintBalanceSourceIndex: balanceVsIndex,
-                    maxStalenessSecs: PYTH_MAX_STALENESS_SECS,
-                }),
-            );
-        }
-        return ixs;
+        const spec = await raydiumSwapperSpec(ctx);
+        return specToIxs(ctx, spec);
+    },
+    async buildRows(ctx) {
+        const spec = await raydiumSwapperSpec(ctx);
+        return specToRows(spec);
     },
 };
 
