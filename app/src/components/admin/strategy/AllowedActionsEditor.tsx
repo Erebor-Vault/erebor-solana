@@ -16,6 +16,8 @@ import {
 import { CopyButton } from "@/components/shared/CopyButton";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { truncateAddress } from "@/lib/format";
+import { lookupRegistryActionLabel } from "@/lib/strategy-presets/lookupActionLabel";
+import { clusterOrThrow } from "@/lib/strategy-presets/registry";
 
 interface Props {
   strategy: StrategyData;
@@ -362,6 +364,11 @@ export function AllowedActionsEditor({ strategy, disabled }: Props) {
                   p.discriminator.length === r.discriminator.length &&
                   p.discriminator.every((b, i) => b === r.discriminator[i])
               );
+              const cluster = clusterOrThrow(
+                (process.env.NEXT_PUBLIC_CLUSTER ?? "devnet") as Parameters<typeof clusterOrThrow>[0]
+              );
+              const registryLabel = lookupRegistryActionLabel(cluster, r.targetProgram, r.discriminator);
+              const displayLabel = matchedPreset?.label ?? registryLabel ?? "Custom action";
               return (
                 <li
                   key={r.publicKey.toBase58()}
@@ -370,7 +377,7 @@ export function AllowedActionsEditor({ strategy, disabled }: Props) {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">
-                        {matchedPreset?.label ?? "Custom action"}
+                        {displayLabel}
                       </span>
                       <span className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]">
                         recipient idx {r.expectedRecipientIndex}
