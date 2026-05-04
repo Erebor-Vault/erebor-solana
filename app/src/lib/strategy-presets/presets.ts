@@ -228,14 +228,31 @@ async function raydiumSwapperSpec(ctx: PresetBuildContext): Promise<PresetBundle
             reg.mockPythProgramId,
         );
         const mintInfo = await getMint(ctx.connection, mint);
-        const expoMagnitude = 8;
-        const exponent = expoMagnitude + mintInfo.decimals - ctx.underlyingDecimals;
+        // Pyth contribution formula (on-chain):
+        //   balance_raw × price_raw × 10^expo × scaleNum / scaleDen
+        // where expo is negative (e.g. −8), so 10^expo = 1/10^|expo|.
+        //
+        // In human terms: balance × price × scaleNum / scaleDen
+        // (the 10^expo cancels with price_raw's implicit 10^|expo| factor,
+        //  so price_raw × 10^expo = price_USD, a pure number).
+        //
+        // For the contribution to land in underlying base units (6 dp):
+        //   (balance_raw / 10^mintDecimals) × price_USD × 10^underlyingDecimals
+        //   = balance_raw × price_USD × 10^(underlyingDecimals - mintDecimals)
+        //
+        // ∴ scaleNum / scaleDen = 10^(underlyingDecimals − mintDecimals).
+        //
+        // Examples:
+        //   6dp underlying + 6dp mint → scale = 1/1
+        //   6dp underlying + 9dp mint (SOL) → scale = 1/1_000
+        //   6dp underlying + 5dp mint (BONK) → scale = 10/1
+        const exponent = ctx.underlyingDecimals - mintInfo.decimals;
         let scaleNum = new BN(1);
         let scaleDen = new BN(1);
         if (exponent >= 0) {
-            scaleDen = new BN(10).pow(new BN(exponent));
+            scaleNum = new BN(10).pow(new BN(exponent));
         } else {
-            scaleNum = new BN(10).pow(new BN(-exponent));
+            scaleDen = new BN(10).pow(new BN(-exponent));
         }
 
         const balanceVsIndex = i * 2;
