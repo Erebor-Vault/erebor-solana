@@ -18,19 +18,6 @@ import {
 import { clusterOrThrow } from "@/lib/strategy-presets/registry";
 import type { Cluster } from "@solana/web3.js";
 
-const CHECKLIST = [
-  { item: "Agent trustworthiness", owner: "Admin/Curator (this checklist)", shipped: false },
-  { item: "Agent track record", owner: "Admin/Curator (this checklist)", shipped: false },
-  { item: "Agent key security", owner: "Admin/Curator (this checklist)", shipped: false },
-  { item: "Choosing allocation weights", owner: "Admin/Curator (set_strategy_weight)", shipped: true },
-  { item: "Continuous monitoring", owner: "Admin/Curator (ongoing responsibility)", shipped: false },
-  { item: "Token/protocol allowlists", owner: "Admin/Curator (manual review — on-chain enforcement planned)", shipped: false },
-  { item: "Velocity limits enforcement", owner: "Admin/Curator (manual monitoring — on-chain limits planned)", shipped: false },
-  { item: "Agent access isolation", owner: "Vault (Anchor constraints)", shipped: true },
-  { item: "Proportional allocations & rebalancing", owner: "Vault (on-chain)", shipped: true },
-  { item: "PDA ownership of all accounts", owner: "Vault (on-chain)", shipped: true },
-];
-
 interface Props {
   onCreated: () => Promise<void>;
 }
@@ -44,19 +31,19 @@ export function CreateStrategyForm({ onCreated }: Props) {
 
   const [delegate, setDelegate] = useState("");
   const [open, setOpen] = useState(false);
-  const [showChecklist, setShowChecklist] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<PresetName | "custom">("custom");
   const [kaminoObligation, setKaminoObligation] = useState("");
   const [applyStep, setApplyStep] = useState<{ current: number; total: number } | null>(null);
 
   const isKaminoPreset = selectedPreset.startsWith("kamino_");
+  const busy = loading || !!applyStep;
+  const canCast =
+    !busy && delegate.trim().length > 0 && (!isKaminoPreset || kaminoObligation.trim().length > 0);
 
   const handleCreate = async () => {
     try {
-      // Validate delegate
       const delegatePubkey = new PublicKey(delegate);
 
-      // Validate kaminoObligation if needed
       let kaminoObligationPk: PublicKey | undefined;
       if (isKaminoPreset) {
         if (!kaminoObligation) {
@@ -65,14 +52,11 @@ export function CreateStrategyForm({ onCreated }: Props) {
         kaminoObligationPk = new PublicKey(kaminoObligation);
       }
 
-      // Capture strategyId before creating
       const strategyId = vault ? new BN(vault.strategyCount.toNumber()) : new BN(0);
 
-      // Create the strategy
       const sig = await createStrategy(delegatePubkey);
       showTxSuccess(sig);
 
-      // Custom path: done
       if (selectedPreset === "custom") {
         setDelegate("");
         setOpen(false);
@@ -80,10 +64,8 @@ export function CreateStrategyForm({ onCreated }: Props) {
         return;
       }
 
-      // Build preset context
       if (!wallet.publicKey) throw new Error("Wallet not connected");
 
-      // Derive strategy PDAs
       const [strategy] = PublicKey.findProgramAddressSync(
         [Buffer.from("strategy"), vaultPda.toBuffer(), strategyId.toArrayLike(Buffer, "le", 8)],
         program.programId,
@@ -97,7 +79,6 @@ export function CreateStrategyForm({ onCreated }: Props) {
         program.programId,
       );
 
-      // Fetch mint decimals
       const mintInfo = await getMint(connection, tokenMint);
 
       const clusterStr = process.env.NEXT_PUBLIC_CLUSTER ?? "devnet";
@@ -118,10 +99,8 @@ export function CreateStrategyForm({ onCreated }: Props) {
         kaminoObligation: kaminoObligationPk,
       };
 
-      // Build preset ixs
       const ixs = await PRESETS_BY_NAME[selectedPreset].buildIxs(ctx);
 
-      // Submit each ix as its own tx
       setApplyStep({ current: 0, total: ixs.length });
       for (let i = 0; i < ixs.length; i++) {
         setApplyStep({ current: i + 1, total: ixs.length });
@@ -149,143 +128,267 @@ export function CreateStrategyForm({ onCreated }: Props) {
     }
   };
 
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="group relative inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-black transition-all hover:bg-[var(--color-accent-glow)] hover:shadow-[0_0_24px_-4px_rgba(127,240,214,0.55)]"
+      >
+        <HexMark />
+        Forge a strategy
+      </button>
+    );
+  }
+
+  const progressPct = applyStep ? (applyStep.current / applyStep.total) * 100 : 0;
+
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <button
-          onClick={() => setShowChecklist(!showChecklist)}
-          className="rounded-lg bg-[var(--color-surface-hover)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-        >
-          {showChecklist ? "Hide Checklist" : "Safety Checklist"}
-        </button>
-        {!open && (
-          <button
-            onClick={() => setOpen(true)}
-            className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-black transition-colors hover:bg-[#12d985]"
-          >
-            + Create Strategy
-          </button>
-        )}
+    <div className="relative overflow-hidden rounded-xl border border-[var(--color-border)] bg-[linear-gradient(180deg,rgba(94,234,212,0.04)_0%,rgba(8,17,26,0)_55%),var(--color-surface-secondary)]">
+      {/* corner runes */}
+      <CornerRune className="absolute left-3 top-3" />
+      <CornerRune className="absolute right-3 top-3 rotate-90" />
+      <CornerRune className="absolute left-3 bottom-3 -rotate-90" />
+      <CornerRune className="absolute right-3 bottom-3 rotate-180" />
+
+      <div className="relative px-7 pt-7 pb-2">
+        <div className="eyebrow flex items-center gap-2">
+          <span aria-hidden>·</span>
+          <span>Strategy forge</span>
+          <span aria-hidden>·</span>
+        </div>
+        <h3 className="font-display mt-1 text-2xl tracking-tight">
+          Cast a new strategy
+        </h3>
+        <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+          Inscribe an allocation slot into the vault. A preset writes the
+          allowed-action whitelist, auto-action configs, and value sources
+          in one bundle.
+        </p>
       </div>
 
-      {open && (
-        <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-5 space-y-4">
-          <h3 className="font-medium">Create New Strategy</h3>
+      <Divider />
 
-          <PresetDropdown
-            value={selectedPreset}
-            onChange={setSelectedPreset}
-            disabled={loading || !!applyStep}
+      {/* Step I — preset */}
+      <Section index="I" title="Choose a preset" busy={busy}>
+        <PresetDropdown
+          value={selectedPreset}
+          onChange={setSelectedPreset}
+          disabled={busy}
+        />
+      </Section>
+
+      {/* Step II — configure */}
+      <Section index="II" title="Configure" busy={busy}>
+        <Field label="Delegate address" required>
+          <input
+            value={delegate}
+            onChange={(e) => setDelegate(e.target.value)}
+            placeholder="Agent / protocol pubkey"
+            disabled={busy}
+            className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_rgba(94,234,212,0.12)] disabled:opacity-50"
+            autoComplete="off"
+            spellCheck={false}
           />
+          <Hint>
+            The wallet allowed to call <code className="font-mono">execute_action</code> on
+            this strategy.
+          </Hint>
+        </Field>
 
-          {isKaminoPreset && (
-            <div>
-              <label className="text-sm text-[var(--color-text-secondary)]">
-                Kamino Obligation Pubkey
-              </label>
-              <input
-                value={kaminoObligation}
-                onChange={(e) => setKaminoObligation(e.target.value)}
-                placeholder="Obligation account pubkey..."
-                className="mt-1 w-full rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-accent)]"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="text-sm text-[var(--color-text-secondary)]">
-              Delegate Address
-            </label>
+        {isKaminoPreset && (
+          <Field label="Kamino obligation pubkey" required>
             <input
-              value={delegate}
-              onChange={(e) => setDelegate(e.target.value)}
-              placeholder="Protocol public key..."
-              className="mt-1 w-full rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-accent)]"
+              value={kaminoObligation}
+              onChange={(e) => setKaminoObligation(e.target.value)}
+              placeholder="Obligation account"
+              disabled={busy}
+              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_rgba(94,234,212,0.12)] disabled:opacity-50"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <Hint>
+              The Kamino position whose deposited cToken amount feeds this
+              strategy&rsquo;s NAV value source.
+            </Hint>
+          </Field>
+        )}
+      </Section>
+
+      <Divider />
+
+      {/* Step III — cast */}
+      <div className="px-7 py-5">
+        <div className="flex items-center gap-3">
+          <StepIndex>III</StepIndex>
+          <span className="text-sm font-medium text-[var(--color-text-primary)]">Cast</span>
+          {applyStep && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-accent-secondary)]">
+              inscribing {applyStep.current} / {applyStep.total}
+            </span>
+          )}
+        </div>
+
+        {applyStep && (
+          <div className="mt-3 h-[3px] w-full overflow-hidden rounded-full bg-[var(--color-surface-hover)]">
+            <div
+              className="h-full bg-[var(--color-accent)] transition-[width] duration-300 ease-out"
+              style={{
+                width: `${progressPct}%`,
+                boxShadow: "0 0 12px rgba(127,240,214,0.6)",
+              }}
             />
           </div>
+        )}
 
-          {applyStep && (
-            <p className="text-sm text-[var(--color-text-secondary)]">
-              Applying preset… {applyStep.current}/{applyStep.total}
-            </p>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleCreate}
-              disabled={loading || !!applyStep || !delegate}
-              className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
-            >
-              {loading || applyStep
-                ? applyStep
-                  ? `Applying… ${applyStep.current}/${applyStep.total}`
-                  : "Creating..."
-                : selectedPreset !== "custom"
-                ? "Create + apply preset"
-                : "Create"}
-            </button>
-            <button
-              onClick={() => setOpen(false)}
-              disabled={!!applyStep}
-              className="rounded-lg bg-[var(--color-surface-hover)] px-4 py-2 text-sm disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <button
+            onClick={() => setOpen(false)}
+            disabled={!!applyStep}
+            className="text-xs text-[var(--color-text-muted)] underline-offset-4 transition hover:text-[var(--color-text-secondary)] hover:underline disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={!canCast}
+            className="group relative inline-flex items-center gap-2 rounded-md bg-[var(--color-accent)] px-5 py-2.5 text-sm font-semibold text-black transition-all hover:bg-[var(--color-accent-glow)] hover:shadow-[0_0_24px_-4px_rgba(127,240,214,0.6)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[var(--color-accent)] disabled:hover:shadow-none"
+          >
+            <HexMark />
+            {applyStep
+              ? `Inscribing ${applyStep.current} / ${applyStep.total}`
+              : loading
+              ? "Forging…"
+              : selectedPreset !== "custom"
+              ? "Cast strategy + apply preset"
+              : "Cast strategy"}
+          </button>
         </div>
-      )}
-
-      {showChecklist && <AgentSafetyChecklist />}
+      </div>
     </div>
   );
 }
 
-function AgentSafetyChecklist() {
+/* ──────────────────────────────────────────────────────────────────── */
+/* sub-components                                                      */
+/* ──────────────────────────────────────────────────────────────────── */
+
+function Section({
+  index,
+  title,
+  busy,
+  children,
+}: {
+  index: string;
+  title: string;
+  busy: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-5 space-y-4">
-      <h3 className="font-medium">Agent Safety Checklist</h3>
-      <p className="text-xs text-[var(--color-text-secondary)]">
-        Review before adding a new agent delegate
-      </p>
-
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[var(--color-text-muted)]">
-            <th className="pb-2 font-medium">Responsibility</th>
-            <th className="pb-2 font-medium">Who handles it</th>
-            <th className="pb-2 font-medium text-center">Status</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--color-border)]">
-          {CHECKLIST.map((row) => (
-            <tr key={row.item}>
-              <td className="py-2 pr-3">{row.item}</td>
-              <td className="py-2 pr-3 text-[var(--color-text-secondary)]">
-                {row.owner}
-              </td>
-              <td className="py-2 text-center">
-                {row.shipped ? (
-                  <span className="text-[var(--color-success)]" title="Shipped">&#10003;</span>
-                ) : (
-                  <span className="text-[var(--color-warning)]" title="Planned / Manual">&#9675;</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-3 text-xs text-[var(--color-text-secondary)] space-y-2">
-        <p>
-          <strong className="text-[var(--color-text-primary)]">Key principle:</strong>{" "}
-          The vault cannot cryptographically guarantee agent behavior.
-          The vault limits the blast radius (max loss = one strategy&apos;s allocation).
-        </p>
-        <p>
-          The admin/curator is responsible for choosing reliable agents that comply with safety rules.
-          This removes the burden of per-agent research from every individual user.
-        </p>
+    <div
+      className={`px-7 py-5 transition-opacity ${busy ? "opacity-70" : ""}`}
+    >
+      <div className="flex items-center gap-3">
+        <StepIndex>{index}</StepIndex>
+        <span className="text-sm font-medium text-[var(--color-text-primary)]">
+          {title}
+        </span>
       </div>
+      <div className="mt-3 ml-9 space-y-4">{children}</div>
     </div>
+  );
+}
+
+function StepIndex({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="inline-flex h-6 w-6 items-center justify-center font-display text-sm leading-none text-[var(--color-accent-secondary)]"
+      aria-hidden
+    >
+      {children}
+    </span>
+  );
+}
+
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline gap-1.5">
+        <label className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-secondary)]">
+          {label}
+        </label>
+        {required && (
+          <span className="text-[10px] text-[var(--color-accent-secondary)]" aria-hidden>
+            *
+          </span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Hint({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">{children}</p>
+  );
+}
+
+function Divider() {
+  return (
+    <div
+      className="mx-7 h-px"
+      style={{
+        background:
+          "linear-gradient(90deg, transparent 0%, rgba(212,162,74,0.25) 50%, transparent 100%)",
+      }}
+    />
+  );
+}
+
+function HexMark() {
+  return (
+    <svg
+      width="10"
+      height="11"
+      viewBox="0 0 10 11"
+      fill="none"
+      aria-hidden
+      className="opacity-90"
+    >
+      <path
+        d="M5 0.5 L9.5 3 L9.5 8 L5 10.5 L0.5 8 L0.5 3 Z"
+        stroke="currentColor"
+        strokeWidth="1"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+function CornerRune({ className }: { className?: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden
+      className={className}
+    >
+      <path
+        d="M0 0 L6 0 M0 0 L0 6"
+        stroke="currentColor"
+        strokeWidth="1"
+        className="text-[var(--color-border-strong)]"
+      />
+    </svg>
   );
 }
