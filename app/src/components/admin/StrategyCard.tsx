@@ -1,13 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import BN from "bn.js";
+import { PublicKey, Keypair } from "@solana/web3.js";
 import { truncateAddress, formatTokenAmount } from "@/lib/format";
 import { useVault } from "@/components/providers/VaultProvider";
+import { useVaultProgram } from "@/hooks/useVaultProgram";
 import { useAuthorityActions } from "@/hooks/useAuthorityActions";
 import { useAdminActions } from "@/hooks/useAdminActions";
+import { useAllowedActions } from "@/hooks/useAllowedActions";
+import { useAutoActionConfigs } from "@/hooks/useAutoActionConfigs";
+import { useValueSources } from "@/hooks/useValueSources";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import type { StrategyData } from "@/hooks/useStrategies";
+import {
+  deriveStrategyTokenPda,
+  deriveStrategyAuthorityPda,
+} from "@/lib/pda";
+import { getCluster } from "@/lib/constants";
+import { PRESETS, type PresetName } from "@/lib/strategy-presets/presets";
+import type { RowId, StrategySnapshot } from "@/lib/strategy-presets/diff";
+import { PresetLabel } from "./strategy/PresetLabel";
+import { ChangePresetModal } from "./strategy/ChangePresetModal";
 
 interface Props {
   strategy: StrategyData;
@@ -15,14 +32,121 @@ interface Props {
 }
 
 export function StrategyCard({ strategy, onRefresh }: Props) {
+  const { connection } = useConnection();
+  const wallet = useWallet();
+  const program = useVaultProgram();
   const { vault, vaultPda } = useVault();
   const { rebalanceStrategy, reportYield } = useAuthorityActions();
   const { deactivateStrategy, setStrategyWeight } = useAdminActions();
   const [weightInput, setWeightInput] = useState("");
   const [showActions, setShowActions] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const [copied, setCopied] = useState<string | null>(null);
+
+  // --- Preset detection ---
+  const strategyId = useMemo(() => strategy.strategyId, [strategy.strategyId]);
+  const { rows: allowedActionRows } = useAllowedActions(strategy.publicKey);
+  const { rows: autoActionRows } = useAutoActionConfigs(strategy.publicKey, strategyId);
+  const { rows: valueSourceRows } = useValueSources(strategy.publicKey, strategyId);
+
+  const snapshot = useMemo<StrategySnapshot>(
+    () => ({
+      allowedActions: allowedActionRows.map((r) => ({
+        targetProgram: r.targetProgram,
+        discriminator: r.discriminator,
+      })),
+      autoActions: autoActionRows.map((r) => ({ kind: r.kind as 0 | 1 })),
+      valueSources: valueSourceRows.map((r) => ({
+        index: r.index,
+        kind: r.kind as 0 | 1 | 2,
+      })),
+    }),
+    [allowedActionRows, autoActionRows, valueSourceRows]
+  );
+
+  // Build presetRowsByName once per (strategy, vault) — cached in a ref so we
+  // don't re-run the async work on every render. Kamino presets need a
+  // kaminoObligation pubkey; for *detection only* we pass a synthetic stable
+  // pubkey — value-source rows store only { type, index }, NOT the target
+  // account, so any pubkey yields the same RowId shape.
+  const [presetRowsByName, setPresetRowsByName] = useState<
+    Record<PresetName, RowId[]>
+  >({
+    kamino_liquidity: [],
+    kamino_looper: [],
+    lulo_lending: [],
+    raydium_swapper: [],
+  });
+
+  // Stable synthetic obligation for detection — generated once per card mount.
+  const syntheticObligation = useRef(Keypair.generate().publicKey).current;
+  const strategyKey = strategy.publicKey.toBase58();
+
+  useEffect(() => {
+    if (!vault || !wallet.publicKey) return;
+
+    const strategyIdBn = strategy.strategyId;
+    const strategyIdNum = strategyIdBn.toNumber();
+    const strategyTokenAccount = deriveStrategyTokenPda(vaultPda, strategyIdNum);
+    const strategyAuthority = deriveStrategyAuthorityPda(vaultPda, strategyIdNum);
+
+    const ctx = {
+      connection,
+      program,
+      cluster: getCluster(),
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      vault: vaultPda,
+      strategyId: strategyIdBn,
+      strategy: strategy.publicKey,
+      strategyTokenAccount,
+      strategyAuthority,
+      underlyingDecimals: 6,
+      kaminoObligation: syntheticObligation,
+    };
+
+    let cancelled = false;
+    Promise.all(PRESETS.map((p) => p.buildRows(ctx).catch(() => [] as RowId[]))).then(
+      (rowsArr) => {
+        if (cancelled) return;
+        const byName: Record<PresetName, RowId[]> = {
+          kamino_liquidity: [],
+          kamino_looper: [],
+          lulo_lending: [],
+          raydium_swapper: [],
+        };
+        PRESETS.forEach((p, i) => {
+          byName[p.name] = rowsArr[i];
+        });
+        setPresetRowsByName(byName);
+      }
+    );
+    return () => { cancelled = true; };
+    // Only recompute when the strategy or vault changes — not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strategyKey, vaultPda.toBase58()]);
+
+  // PresetBuildContext for the ChangePresetModal (uses real wallet pubkey).
+  const presetCtx = useMemo(() => {
+    if (!wallet.publicKey) return null;
+    const strategyIdNum = strategy.strategyId.toNumber();
+    return {
+      connection,
+      program,
+      cluster: getCluster(),
+      admin: wallet.publicKey,
+      vaultState: vaultPda,
+      vault: vaultPda,
+      strategyId: strategy.strategyId,
+      strategy: strategy.publicKey,
+      strategyTokenAccount: deriveStrategyTokenPda(vaultPda, strategyIdNum),
+      strategyAuthority: deriveStrategyAuthorityPda(vaultPda, strategyIdNum),
+      underlyingDecimals: 6,
+      kaminoObligation: syntheticObligation,
+    };
+  }, [wallet.publicKey, vaultPda, strategy.strategyId, strategy.publicKey, connection, program, syntheticObligation]);
 
   function copyAddress(label: string, address: string) {
     navigator.clipboard.writeText(address);
@@ -63,7 +187,7 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
 
   return (
     <div className="rounded-xl bg-[var(--color-surface-secondary)] border border-[var(--color-border)] p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-3">
           <span className="text-lg font-bold">#{strategy.strategyId.toString()}</span>
           <span
@@ -97,6 +221,15 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Preset label — always rendered, shows "…" while rows are computed */}
+      <div className="mb-3">
+        <PresetLabel
+          snapshot={snapshot}
+          presetRowsByName={presetRowsByName}
+          onChangeClick={() => setModalOpen(true)}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm">
@@ -235,6 +368,17 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Change-preset modal */}
+      {presetCtx && (
+        <ChangePresetModal
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          ctx={presetCtx}
+          snapshot={snapshot}
+          onApplied={onRefresh}
+        />
       )}
     </div>
   );
