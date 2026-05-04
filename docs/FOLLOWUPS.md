@@ -18,6 +18,7 @@
 | 5 | Value sources + NAV settle, AutoActionConfig, signed-delta rebalance, allowed-action loss caps + cooldown, sibling-instruction introspection, fan-out on deposit, `_reserved` cushions |
 | 5b | PythPriceFeed ValueSource + mock_pyth program (Plan 1 of strategy-presets) |
 | 5c | PROTOCOL_REGISTRY (devnet wired, mainnet stubbed) + crank-mock-prices keeper (Plan 2) |
+| 5d | StrategyPreset bundles + diff + UI (Plan 3 of strategy-presets) |
 
 Live program id: `FuAJhyS6ZB9RbVEoeUVhezbWQz7g7k71QqVD6TWFYEDo`.
 
@@ -78,7 +79,7 @@ Not started. When user signals go-time:
 
 ### A4. Mainnet wiring for strategy-config presets
 
-**Status:** Plans 1 + 2 shipped 2026-05-03. Plan 1 = on-chain `PythPriceFeed` + `mock_pyth`; Plan 2 = per-cluster `PROTOCOL_REGISTRY` (devnet wired, mainnet stubbed) + `crank-mock-prices.ts` keeper. Plan 3 (preset bundles + UI) is the next slice; mainnet wiring items below remain.
+**Status:** Plans 1, 2, and 3 shipped 2026-05-03. Plan 1 = on-chain `PythPriceFeed` + `mock_pyth`; Plan 2 = per-cluster `PROTOCOL_REGISTRY` + `crank-mock-prices.ts` keeper; Plan 3 = four `StrategyPreset` bundles + diff engine + create-strategy preset dropdown + change-preset modal. Mainnet wiring items below remain.
 
 Tracks the spec at
 [superpowers/specs/2026-05-03-strategy-config-presets-design.md](superpowers/specs/2026-05-03-strategy-config-presets-design.md).
