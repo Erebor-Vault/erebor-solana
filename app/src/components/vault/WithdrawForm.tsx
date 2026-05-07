@@ -5,8 +5,6 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWithdraw } from "@/hooks/useWithdraw";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { useVault } from "@/components/providers/VaultProvider";
-import { useStrategies } from "@/hooks/useStrategies";
-import { useAuthorityActions } from "@/hooks/useAuthorityActions";
 import { AmountInput } from "@/components/shared/AmountInput";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { parseTokenInput, formatTokenAmount } from "@/lib/format";
@@ -16,12 +14,10 @@ export function WithdrawForm() {
   const { withdraw, loading } = useWithdraw();
   const { sharePrice, reserveBalance, vault } = useVault();
   const { shareBalance, refresh: refreshPosition } = useUserPosition();
-  const { strategies } = useStrategies();
-  const { rebalanceAll } = useAuthorityActions();
   const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("");
 
-  const parsedShares = parseTokenInput(amount);
+  const parsedShares = parseTokenInput(amount, 12);
   const grossTokens = parsedShares
     ? parsedShares.toNumber() * sharePrice
     : 0;
@@ -39,27 +35,6 @@ export function WithdrawForm() {
       const sig = await withdraw(parsedShares);
       showTxSuccess(sig);
       setAmount("");
-
-      // Auto-rebalance all active strategies after withdrawal
-      if (vault) {
-        const activeStrategies = strategies.filter(
-          (s) => s.isActive && s.targetWeightBps > 0
-        );
-        if (activeStrategies.length > 0) {
-          setStatus("Rebalancing strategies...");
-          const sigs = await rebalanceAll(
-            activeStrategies.map((s) => ({
-              strategyId: s.strategyId.toNumber(),
-              tokenAccount: s.tokenAccount,
-              allocatedAmount: s.allocatedAmount,
-              targetWeightBps: s.targetWeightBps,
-            })),
-            vault.totalDeposited.toNumber() - estimatedTokens
-          );
-          if (sigs.length > 0) showTxSuccess(sigs[sigs.length - 1]);
-        }
-      }
-
       setStatus("");
       await refreshPosition();
     } catch (err) {
@@ -74,6 +49,7 @@ export function WithdrawForm() {
         value={amount}
         onChange={setAmount}
         maxAmount={shareBalance.toNumber()}
+        decimals={12}
         label="Shares to Burn"
         symbol="Shares"
         disabled={!connected || loading}

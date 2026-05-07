@@ -5,8 +5,6 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useDeposit } from "@/hooks/useDeposit";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { useVault } from "@/components/providers/VaultProvider";
-import { useStrategies } from "@/hooks/useStrategies";
-import { useAuthorityActions } from "@/hooks/useAuthorityActions";
 import { AmountInput } from "@/components/shared/AmountInput";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
 import { parseTokenInput, formatTokenAmount } from "@/lib/format";
@@ -14,10 +12,8 @@ import { parseTokenInput, formatTokenAmount } from "@/lib/format";
 export function DepositForm() {
   const { connected } = useWallet();
   const { deposit, loading } = useDeposit();
-  const { sharePrice, vault } = useVault();
+  const { sharePrice } = useVault();
   const { tokenBalance, refresh: refreshPosition } = useUserPosition();
-  const { strategies } = useStrategies();
-  const { rebalanceAll } = useAuthorityActions();
   const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("");
 
@@ -33,27 +29,6 @@ export function DepositForm() {
       const sig = await deposit(parsedAmount);
       showTxSuccess(sig);
       setAmount("");
-
-      // Auto-rebalance all active strategies after deposit
-      if (vault) {
-        const activeStrategies = strategies.filter(
-          (s) => s.isActive && s.targetWeightBps > 0
-        );
-        if (activeStrategies.length > 0) {
-          setStatus("Rebalancing strategies...");
-          const sigs = await rebalanceAll(
-            activeStrategies.map((s) => ({
-              strategyId: s.strategyId.toNumber(),
-              tokenAccount: s.tokenAccount,
-              allocatedAmount: s.allocatedAmount,
-              targetWeightBps: s.targetWeightBps,
-            })),
-            vault.totalDeposited.toNumber() + parsedAmount.toNumber()
-          );
-          if (sigs.length > 0) showTxSuccess(sigs[sigs.length - 1]);
-        }
-      }
-
       setStatus("");
       await refreshPosition();
     } catch (err) {
