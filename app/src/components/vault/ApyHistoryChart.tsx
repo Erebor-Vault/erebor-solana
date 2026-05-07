@@ -16,7 +16,7 @@ import { useVaultProgram } from "@/hooks/useVaultProgram";
 import { PROGRAM_ID } from "@/lib/constants";
 
 const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
-const SIG_LIMIT = 200;
+const SIG_LIMIT = 50;
 
 interface YieldPoint {
   ts: number;
@@ -75,14 +75,21 @@ export function ApyHistoryChart() {
         const sigs = await connection.getSignaturesForAddress(PROGRAM_ID, {
           limit: SIG_LIMIT,
         });
+        if (cancelled) return;
+        const okSigs = sigs.filter((s) => !s.err && s.blockTime);
+        const txs = okSigs.length
+          ? await connection.getTransactions(
+              okSigs.map((s) => s.signature),
+              { commitment: "confirmed", maxSupportedTransactionVersion: 0 }
+            )
+          : [];
+        if (cancelled) return;
         const yieldEvents: { ts: number; signedDelta: number; principal: number }[] = [];
-        for (const s of sigs) {
-          if (cancelled) return;
-          if (s.err || !s.blockTime) continue;
-          const tx = await connection.getTransaction(s.signature, {
-            commitment: "confirmed",
-            maxSupportedTransactionVersion: 0,
-          });
+        for (let i = 0; i < okSigs.length; i++) {
+          const s = okSigs[i];
+          const blockTime = s.blockTime ?? 0;
+          if (!blockTime) continue;
+          const tx = txs[i];
           const logs = tx?.meta?.logMessages ?? [];
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           for (const ev of decodeEvents(logs, program.coder as any)) {
@@ -91,13 +98,13 @@ export function ApyHistoryChart() {
             if (v?.toBase58?.() !== vaultKey) continue;
             if (ev.name === "YieldReported") {
               yieldEvents.push({
-                ts: s.blockTime,
+                ts: blockTime,
                 signedDelta: bnToNumber(data.yieldAmount),
                 principal: Math.max(1, bnToNumber(data.newTotalDeposited) - bnToNumber(data.yieldAmount)),
               });
             } else if (ev.name === "LossReported") {
               yieldEvents.push({
-                ts: s.blockTime,
+                ts: blockTime,
                 signedDelta: -bnToNumber(data.amount),
                 principal: Math.max(1, bnToNumber(data.newTotalDeposited) + bnToNumber(data.amount)),
               });
@@ -106,7 +113,7 @@ export function ApyHistoryChart() {
               const prevAlloc = bnToNumber(data.previousAllocated);
               if (prevAlloc > 0) {
                 yieldEvents.push({
-                  ts: s.blockTime,
+                  ts: blockTime,
                   signedDelta: delta,
                   principal: Math.max(1, prevAlloc),
                 });

@@ -144,32 +144,40 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
+      // Single batched RPC: vault state + share mint + reserve ATA.
+      // Replaces 3 sequential calls (vaultState.fetch + getTokenSupply +
+      // getTokenAccountBalance) with one getMultipleAccountsInfo.
+      const [vaultInfo, shareMintInfo, reserveInfo] =
+        await connection.getMultipleAccountsInfo([vaultPda, shareMintPda, reserveAta]);
+
+      if (!vaultInfo) {
+        setError("Vault not initialized for this token mint");
+        setLoading(false);
+        return;
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const vaultAccount = await (program.account as any).vaultState.fetch(vaultPda);
+      const vaultAccount = (program.coder.accounts as any).decode("vaultState", vaultInfo.data);
       setVault(vaultAccount as unknown as VaultData);
 
-      try {
-        const supplyInfo = await connection.getTokenSupply(shareMintPda);
-        setShareSupply(new BN(supplyInfo.value.amount));
-      } catch {
+      // SPL Mint: supply is u64 LE at offset 36.
+      if (shareMintInfo?.data && shareMintInfo.data.length >= 44) {
+        setShareSupply(new BN(shareMintInfo.data.subarray(36, 44), "le"));
+      } else {
         setShareSupply(new BN(0));
       }
 
-      try {
-        const reserveInfo = await connection.getTokenAccountBalance(reserveAta);
-        setReserveBalance(new BN(reserveInfo.value.amount));
-      } catch {
+      // SPL Token account: amount is u64 LE at offset 64.
+      if (reserveInfo?.data && reserveInfo.data.length >= 72) {
+        setReserveBalance(new BN(reserveInfo.data.subarray(64, 72), "le"));
+      } else {
         setReserveBalance(new BN(0));
       }
 
       setError(null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to fetch vault";
-      if (message.includes("Account does not exist")) {
-        setError("Vault not initialized for this token mint");
-      } else {
-        setError(message);
-      }
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -178,7 +186,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
     if (!hasActiveVault) return;
-    const interval = setInterval(refresh, 30000);
+    const interval = setInterval(refresh, 120000);
     return () => clearInterval(interval);
   }, [refresh, hasActiveVault]);
 

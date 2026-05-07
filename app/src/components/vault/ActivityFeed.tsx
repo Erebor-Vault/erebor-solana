@@ -75,40 +75,44 @@ export function ActivityFeed() {
 
     (async () => {
       try {
+        // Backfill is intentionally small: 8 sigs → 1 batched getTransactions
+        // call (web3.js packs these into a single JSON-RPC batch). Total RPC
+        // cost is ~2 calls regardless of result count. Live `onLogs` keeps
+        // newer events flowing.
         const sigs: ConfirmedSignatureInfo[] = await connection.getSignaturesForAddress(
           PROGRAM_ID,
-          { limit: 25 }
+          { limit: 8 }
         );
+        if (cancelled) return;
+        const okSigs = sigs.filter((s) => !s.err);
+        const txs = okSigs.length
+          ? await connection.getTransactions(
+              okSigs.map((s) => s.signature),
+              { commitment: "confirmed", maxSupportedTransactionVersion: 0 }
+            )
+          : [];
+        if (cancelled) return;
         const out: ActivityRow[] = [];
-        for (const s of sigs) {
-          if (cancelled) return;
-          if (s.err) continue;
-          try {
-            const tx = await connection.getTransaction(s.signature, {
-              commitment: "confirmed",
-              maxSupportedTransactionVersion: 0,
+        for (let i = 0; i < okSigs.length; i++) {
+          const s = okSigs[i];
+          const tx = txs[i];
+          const logs = tx?.meta?.logMessages ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          for (const ev of extractEvents(logs, program.coder as any)) {
+            const vault =
+              typeof ev.data?.vault === "object" && ev.data?.vault !== null
+                ? (ev.data.vault as { toBase58?: () => string }).toBase58?.()
+                : undefined;
+            if (vault && vault !== vaultKey) continue;
+            out.push({
+              signature: s.signature,
+              slot: s.slot,
+              blockTime: s.blockTime ?? null,
+              eventName: ev.name,
+              data: ev.data,
+              vault,
             });
-            const logs = tx?.meta?.logMessages ?? [];
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            for (const ev of extractEvents(logs, program.coder as any)) {
-              const vault =
-                typeof ev.data?.vault === "object" && ev.data?.vault !== null
-                  ? (ev.data.vault as { toBase58?: () => string }).toBase58?.()
-                  : undefined;
-              if (vault && vault !== vaultKey) continue;
-              out.push({
-                signature: s.signature,
-                slot: s.slot,
-                blockTime: s.blockTime ?? null,
-                eventName: ev.name,
-                data: ev.data,
-                vault,
-              });
-            }
-          } catch {
-            // skip txs we can't fetch
           }
-          if (out.length >= 20) break;
         }
         if (!cancelled) setRows(out);
       } finally {

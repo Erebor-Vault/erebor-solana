@@ -32,20 +32,19 @@ export function useUserPosition(): UserPosition & { refresh: () => Promise<void>
     setLoading(true);
     try {
       const shareAta = deriveUserAta(shareMintPda, publicKey);
-      try {
-        const info = await connection.getTokenAccountBalance(shareAta);
-        setShareBalance(new BN(info.value.amount));
-      } catch {
-        setShareBalance(new BN(0));
-      }
-
       const tokenAta = deriveUserAta(tokenMint, publicKey);
-      try {
-        const info = await connection.getTokenAccountBalance(tokenAta);
-        setTokenBalance(new BN(info.value.amount));
-      } catch {
-        setTokenBalance(new BN(0));
-      }
+      // Batched: 1 RPC instead of 2.
+      const [shareInfo, tokenInfo] = await connection.getMultipleAccountsInfo([shareAta, tokenAta]);
+      setShareBalance(
+        shareInfo?.data && shareInfo.data.length >= 72
+          ? new BN(shareInfo.data.subarray(64, 72), "le")
+          : new BN(0)
+      );
+      setTokenBalance(
+        tokenInfo?.data && tokenInfo.data.length >= 72
+          ? new BN(tokenInfo.data.subarray(64, 72), "le")
+          : new BN(0)
+      );
     } finally {
       setLoading(false);
     }
@@ -53,7 +52,7 @@ export function useUserPosition(): UserPosition & { refresh: () => Promise<void>
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 15000);
+    const interval = setInterval(refresh, 60000);
     return () => clearInterval(interval);
   }, [refresh]);
 

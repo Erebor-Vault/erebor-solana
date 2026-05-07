@@ -40,43 +40,56 @@ export function AggregateStats() {
     setAgg((a) => ({ ...a, loading: true }));
 
     (async () => {
+      // Single batched RPC: 3N keys per vault (vaultState, shareMint,
+      // userShareAta when wallet connected). Replaces a sequential per-vault
+      // loop of up to 3 calls each.
+      const triples = vaultEntries.map((entry) => {
+        const vaultPda = deriveVaultPda(entry.tokenMint, entry.vaultId);
+        const shareMint = deriveShareMintPda(vaultPda);
+        const userShareAta = publicKey ? deriveUserAta(shareMint, publicKey) : null;
+        return { entry, vaultPda, shareMint, userShareAta };
+      });
+      const keys = triples.flatMap((t) =>
+        t.userShareAta ? [t.vaultPda, t.shareMint, t.userShareAta] : [t.vaultPda, t.shareMint]
+      );
+      let infos: Awaited<ReturnType<typeof connection.getMultipleAccountsInfo>> = [];
+      try {
+        infos = await connection.getMultipleAccountsInfo(keys);
+      } catch {
+        // network failure — render zeros
+      }
+      if (cancelled) return;
+
       let totalTvl = new BN(0);
       let initialized = 0;
       let totalStrategies = 0;
       let userValue = new BN(0);
       let userVaultCount = 0;
 
-      for (const entry of vaultEntries) {
-        const vaultPda = deriveVaultPda(entry.tokenMint, entry.vaultId);
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const vault: any = await (program.account as any).vaultState.fetch(vaultPda);
-          initialized += 1;
-          totalTvl = totalTvl.add(vault.totalDeposited as BN);
-          totalStrategies += (vault.strategyCount as BN).toNumber();
+      let cursor = 0;
+      const stride = publicKey ? 3 : 2;
+      for (const t of triples) {
+        const vaultInfo = infos[cursor];
+        const shareInfo = infos[cursor + 1];
+        const userShareInfo = publicKey ? infos[cursor + 2] : undefined;
+        cursor += stride;
+        if (!vaultInfo) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const vault = (program.coder.accounts as any).decode("vaultState", vaultInfo.data);
+        initialized += 1;
+        totalTvl = totalTvl.add(vault.totalDeposited as BN);
+        totalStrategies += (vault.strategyCount as BN).toNumber();
 
-          if (publicKey) {
-            const shareMint = deriveShareMintPda(vaultPda);
-            const userShareAta = deriveUserAta(shareMint, publicKey);
-            try {
-              const sharesInfo = await connection.getTokenAccountBalance(userShareAta);
-              const shares = new BN(sharesInfo.value.amount);
-              if (!shares.isZero()) {
-                const supplyInfo = await connection.getTokenSupply(shareMint);
-                const supply = new BN(supplyInfo.value.amount);
-                if (!supply.isZero()) {
-                  // user_value = shares * total_deposited / supply
-                  const value = shares.mul(vault.totalDeposited as BN).div(supply);
-                  userValue = userValue.add(value);
-                  userVaultCount += 1;
-                }
-              }
-            } catch {
-              // user has no shares ATA for this vault
+        if (publicKey && userShareInfo?.data && userShareInfo.data.length >= 72) {
+          const shares = new BN(userShareInfo.data.subarray(64, 72), "le");
+          if (!shares.isZero() && shareInfo?.data && shareInfo.data.length >= 44) {
+            const supply = new BN(shareInfo.data.subarray(36, 44), "le");
+            if (!supply.isZero()) {
+              const value = shares.mul(vault.totalDeposited as BN).div(supply);
+              userValue = userValue.add(value);
+              userVaultCount += 1;
             }
           }
-        } catch {
-          // vault not initialized — skip
         }
       }
 

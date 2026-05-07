@@ -103,7 +103,7 @@ export function useStrategies() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 30000);
+    const interval = setInterval(refresh, 120000);
     return () => clearInterval(interval);
   }, [refresh]);
 
