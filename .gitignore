@@ -4,6 +4,11 @@ target
 test-ledger
 **/*.rs.bk
 id.json
+defi-alpha-admin.json
+demo-admin.json
+demo-mint.json
+.env.demo
+e2e_wallet.json
 on-chain.so
 
 # Dependencies
