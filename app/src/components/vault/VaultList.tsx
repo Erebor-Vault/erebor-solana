@@ -7,7 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { useVault } from "@/components/providers/VaultProvider";
 import { useVaultProgram } from "@/hooks/useVaultProgram";
-import { deriveVaultPda, deriveReserveAta } from "@/lib/pda";
+import { deriveVaultPda, deriveReserveAta, deriveShareMintPda } from "@/lib/pda";
 import { formatTokenAmount, formatSharePrice, truncateAddress } from "@/lib/format";
 import { CopyButton } from "@/components/shared/CopyButton";
 import type { VaultEntry } from "@/lib/constants";
@@ -32,46 +32,58 @@ export function VaultList() {
   useEffect(() => {
     let cancelled = false;
     async function fetchAll() {
-      const results: VaultSummary[] = [];
-
-      for (const entry of vaultEntries) {
+      // Single batched RPC: 3N keys (vaultState, shareMint, reserveAta per
+      // entry) into one getMultipleAccountsInfo. Replaces 3N sequential
+      // calls with 1.
+      const triples = vaultEntries.map((entry) => {
         const vaultPda = deriveVaultPda(entry.tokenMint, entry.vaultId);
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const vault = await (program.account as any).vaultState.fetch(vaultPda);
-          const reserveAta = deriveReserveAta(vaultPda, entry.tokenMint);
-          let reserveBalance = new BN(0);
-          let shareSupply = new BN(0);
-          try {
-            const bal = await connection.getTokenAccountBalance(reserveAta);
-            reserveBalance = new BN(bal.value.amount);
-          } catch {}
-          try {
-            const sup = await connection.getTokenSupply(vault.shareMint);
-            shareSupply = new BN(sup.value.amount);
-          } catch {}
+        const shareMint = deriveShareMintPda(vaultPda);
+        const reserveAta = deriveReserveAta(vaultPda, entry.tokenMint);
+        return { entry, vaultPda, shareMint, reserveAta };
+      });
+      const keys = triples.flatMap((t) => [t.vaultPda, t.shareMint, t.reserveAta]);
+      let infos: Awaited<ReturnType<typeof connection.getMultipleAccountsInfo>> = [];
+      try {
+        infos = await connection.getMultipleAccountsInfo(keys);
+      } catch {
+        // network failure — leave all entries as nonexistent
+      }
+      if (cancelled) return;
 
-          results.push({
-            entry,
-            vaultPda,
-            totalDeposited: vault.totalDeposited,
-            shareSupply,
-            strategyCount: vault.strategyCount.toNumber(),
-            reserveBalance,
-            exists: true,
-          });
-        } catch {
-          results.push({
-            entry,
-            vaultPda,
+      const results: VaultSummary[] = triples.map((t, i) => {
+        const vaultInfo = infos[i * 3];
+        const shareInfo = infos[i * 3 + 1];
+        const reserveInfo = infos[i * 3 + 2];
+        if (!vaultInfo) {
+          return {
+            entry: t.entry,
+            vaultPda: t.vaultPda,
             totalDeposited: new BN(0),
             shareSupply: new BN(0),
             strategyCount: 0,
             reserveBalance: new BN(0),
             exists: false,
-          });
+          };
         }
-      }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const vault = (program.coder.accounts as any).decode("vaultState", vaultInfo.data);
+        // SPL Mint: supply u64 LE at offset 36; SPL Token: amount u64 LE at offset 64.
+        const shareSupply = shareInfo?.data && shareInfo.data.length >= 44
+          ? new BN(shareInfo.data.subarray(36, 44), "le")
+          : new BN(0);
+        const reserveBalance = reserveInfo?.data && reserveInfo.data.length >= 72
+          ? new BN(reserveInfo.data.subarray(64, 72), "le")
+          : new BN(0);
+        return {
+          entry: t.entry,
+          vaultPda: t.vaultPda,
+          totalDeposited: vault.totalDeposited as BN,
+          shareSupply,
+          strategyCount: (vault.strategyCount as BN).toNumber(),
+          reserveBalance,
+          exists: true,
+        };
+      });
 
       if (!cancelled) {
         setSummaries(results);
@@ -140,6 +152,14 @@ function VaultRow({ s, isActive }: { s: VaultSummary; isActive: boolean }) {
             <span className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-hover)] px-2 py-0.5 text-xs font-medium text-[var(--color-text-secondary)]">
               {s.entry.tokenSymbol}
             </span>
+            {s.entry.demoVault ? (
+              <span
+                title="Demo vault — anyone can connect the embedded admin wallet to test admin actions"
+                className="rounded-md border border-[var(--color-accent-secondary)]/50 bg-[var(--color-accent-secondary)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent-secondary)]"
+              >
+                DEMO · everyone is admin
+              </span>
+            ) : null}
             {!s.exists ? (
               <span className="rounded-md border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-2 py-0.5 text-xs font-medium text-[var(--color-danger)]">
                 not initialized

@@ -7,11 +7,13 @@ import { useRoles } from "@/hooks/useRoles";
 import { VaultStats } from "@/components/vault/VaultStats";
 import { UserPosition } from "@/components/vault/UserPosition";
 import { DepositForm } from "@/components/vault/DepositForm";
+import { DemoFaucetButton } from "@/components/vault/DemoFaucetButton";
 import { WithdrawForm } from "@/components/vault/WithdrawForm";
 import { AllocationChart } from "@/components/admin/AllocationChart";
 import { ApyHistoryChart } from "@/components/vault/ApyHistoryChart";
 import { PausedBanner } from "@/components/vault/PausedBanner";
 import { PendingRoleBanner } from "@/components/vault/PendingRoleBanner";
+import { DemoVaultBanner } from "@/components/vault/DemoVaultBanner";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { truncateAddress } from "@/lib/format";
 
@@ -42,6 +44,7 @@ export function VaultDetailContent() {
 
   return (
     <div className="space-y-8">
+      <DemoVaultBanner />
       <div>
         <Link
           href="/"
@@ -132,6 +135,7 @@ export function VaultDetailContent() {
             </div>
             {tab === "deposit" ? <DepositForm /> : <WithdrawForm />}
           </div>
+          <DemoFaucetButton />
           <UserPosition />
         </div>
         <AllocationChart />

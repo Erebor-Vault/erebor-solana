@@ -45,7 +45,20 @@ export interface VaultEntry {
   tokenSymbol: string;
   tokenDecimals: number;
   vaultId: number;
+  /** When true, the vault page renders a "Get demo tokens" faucet button.
+   *  Requires `demo_faucet.register_mint` to have been called for the
+   *  vault's `tokenMint`. Devnet demos only — never set on prod vaults. */
+  demoFaucet?: boolean;
+  /** When true, this is a "play with admin" demo vault. The frontend offers
+   *  a wallet adapter that loads the admin/authority keypair from
+   *  `NEXT_PUBLIC_DEMO_ADMIN_KEYPAIR_BS58`, so anyone visiting can sign
+   *  admin txs against it. Devnet only — the keypair is public by design. */
+  demoVault?: boolean;
 }
+
+export const DEMO_FAUCET_PROGRAM_ID = new PublicKey(
+  "C86dEAtswZXMNqVPM6uhftE2yfwwv6qCxo3RpUXa777E"
+);
 
 // Round-7 test mint (created by setup-multi-vaults.ts on 2026-05-02 after
 // closing + redeploying the 3 programs under fresh keypairs). Pre-redeploy
@@ -53,6 +66,10 @@ export interface VaultEntry {
 // 5BTPntEhZ…) are orphaned — see docs/DEPLOYMENT.md.
 const TEST_USDC_MINT = new PublicKey(
   "7MNPXdG3oEWFdJNGPuQMDVZzGNXts1zhCLejD49Lp3hE"
+);
+
+const E2E_TEST_MINT = new PublicKey(
+  "J11HnbyCkg5XgpGXZaLHR3KpRCMhxaYfWPnd7EeeyXuZ"
 );
 
 export const VAULT_REGISTRY: VaultEntry[] = [
@@ -63,6 +80,24 @@ export const VAULT_REGISTRY: VaultEntry[] = [
     tokenDecimals: 6,
     vaultId: 0,
   },
+  // Demo Vault — slot #2. Uses a dedicated mint whose authority is the
+  // demo_faucet PDA (so the faucet can `mintTo` for everyone). Set
+  // NEXT_PUBLIC_DEMO_MINT to the value `setup-demo-vault.ts` writes to
+  // ./demo-mint.json. If unset the entry is hidden from the registry so a
+  // fresh checkout doesn't render a broken vault card.
+  ...(process.env.NEXT_PUBLIC_DEMO_MINT
+    ? [
+        {
+          name: "Demo Vault",
+          tokenMint: new PublicKey(process.env.NEXT_PUBLIC_DEMO_MINT),
+          tokenSymbol: "dUSDC",
+          tokenDecimals: 6,
+          vaultId: 0,
+          demoFaucet: true,
+          demoVault: true,
+        } satisfies VaultEntry,
+      ]
+    : []),
   {
     name: "Conservative",
     tokenMint: TEST_USDC_MINT,
@@ -90,6 +125,14 @@ export const VAULT_REGISTRY: VaultEntry[] = [
     tokenSymbol: "USDC",
     tokenDecimals: 6,
     vaultId: 4,
+  },
+  {
+    name: "E2E Test Vault",
+    tokenMint: E2E_TEST_MINT,
+    tokenSymbol: "tUSDC",
+    tokenDecimals: 6,
+    vaultId: 0,
+    demoFaucet: true,
   },
 ];
 
