@@ -8,6 +8,24 @@ const MOCK_PYTH = new PublicKey("2AnSsnWA2W64aAtBEHtouJkotTqXwTSEEvDPfa4YURoq");
 
 const ROUND_7_TEST_USDC = new PublicKey("7MNPXdG3oEWFdJNGPuQMDVZzGNXts1zhCLejD49Lp3hE");
 
+// Devnet test mints from scripts/mvp-mints-devnet.json — every entry on the
+// protocol AllowedToken list goes here so `crank-mock-prices.ts --loop`
+// keeps every feed fresh inside the 60s settle staleness window.
+const MVP_DEVNET_MINTS: { mint: string; coingeckoId: string }[] = [
+    { mint: "BApn44vuNabDPPmcoZ9SSEVu7kBAHsLGhAaDk6EQYtoP", coingeckoId: "solana" },          // wSOL
+    { mint: "EA85kR8c9QDbK7Lmuzg3cjbbAHMRCKgofZTrMcgy59jp", coingeckoId: "usd-coin" },        // USDC test
+    { mint: "5zfd1K5Z4Mp7UL1kkX2gdvtFeWispNd7AW79Wifk3sA9", coingeckoId: "tether" },          // USDT
+    { mint: "35LEpQDEfCDN1P5A7avee2nq7kDcgSmxFw8ASGyj8SRc", coingeckoId: "jupiter-exchange-solana" }, // JUP
+    { mint: "GcvDs7U3XtUFNkn1DmMWijTUvn2zrxir8pPYsVzGV3y3", coingeckoId: "jito-staked-sol" }, // jitoSOL
+    { mint: "Et9BBsMFXYTMie2DrWQ3jUwsrMMDsTEDJjhpySbktVvX", coingeckoId: "raydium" },         // RAY
+    { mint: "G7nkqwtnmq3BL4rvzPRALbnJeFk4beE1qhVMM3pJXvHH", coingeckoId: "msol" },            // mSOL
+    { mint: "8gyvY5BDxY7pYNnLFgh1YXgRFuxeNTZu1qWzcsuTTzXV", coingeckoId: "weth" },            // wETH
+    { mint: "Hj3Tnp4iHZagYCth8knkmFQYeMuLcRxiNrqfCLNL87to", coingeckoId: "bonk" },            // BONK
+    { mint: "F9TnvVFNmqvHNB9LSmU5KFsh2hPhFhjydiLmzdoPYqfS", coingeckoId: "dogwifcoin" },      // WIF
+    { mint: "DzsuEFh3H9865qthqMTW54twpKT3rUYpMTsCjZ8hzq1N", coingeckoId: "pyth-network" },    // PYTH
+    { mint: "8dTktSDs2jRfd9bVw896EELPeqaHenudGCKtB9gBQgnf", coingeckoId: "kamino" },          // KMNO
+];
+
 export const PROTOCOL_REGISTRY: ProtocolRegistry = {
     devnet: {
         mockPythProgramId: MOCK_PYTH,
@@ -47,6 +65,10 @@ export const PROTOCOL_REGISTRY: ProtocolRegistry = {
                 coingeckoId: "usd-coin",
                 // feedPda omitted — keeper derives [b"price", mint] under MOCK_PYTH.
             },
+            ...MVP_DEVNET_MINTS.map((m) => ({
+                mint: new PublicKey(m.mint),
+                coingeckoId: m.coingeckoId,
+            })),
         ],
     },
     "mainnet-beta": {
