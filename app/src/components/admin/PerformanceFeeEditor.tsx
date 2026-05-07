@@ -63,7 +63,6 @@ export function PerformanceFeeEditor() {
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">
           Charged at <code>withdraw</code> time on the redeemed amount; routed
           to the admin&apos;s ATA. Default 500 bps (5%); cap {MAX_BPS} bps (20%).
-          See docs/OVERVIEW.md §11.
         </p>
       </header>
 

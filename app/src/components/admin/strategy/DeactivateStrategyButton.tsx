@@ -62,9 +62,8 @@ export function DeactivateStrategyButton({ strategy, disabled, onChanged }: Prop
       {!drained ? (
         <p className="mt-2 rounded-md border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/10 p-2 text-xs text-[var(--color-warning)]">
           Drain first. The program rejects the call while{" "}
-          <code>allocated_amount</code> or the strategy ATA is non-zero
-          (Phase-2 guard, see docs/MISMATCHES.md §2.2). Use the Authority actions
-          panel above to deallocate, then come back.
+          <code>allocated_amount</code> or the strategy ATA is non-zero.
+          Use the Authority actions panel above to deallocate, then come back.
         </p>
       ) : null}
 

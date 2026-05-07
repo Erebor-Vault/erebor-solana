@@ -11,6 +11,11 @@ demo-mint.json
 e2e_wallet.json
 on-chain.so
 
+# Local debug artifacts (RPC traces, page snapshots, telemetry stubs)
+helius-*.log
+vault-page.yml
+.superstack/
+
 # Dependencies
 node_modules
 app/node_modules
