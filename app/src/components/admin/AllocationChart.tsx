@@ -11,7 +11,10 @@ import {
 import BN from "bn.js";
 import { useVault } from "@/components/providers/VaultProvider";
 import { useStrategies } from "@/hooks/useStrategies";
-import { formatTokenAmount } from "@/lib/format";
+import { useTokenMix } from "@/hooks/useTokenMix";
+import { useTokenMetadata } from "@/hooks/useTokenMetadata";
+import { lookupTokenSymbol } from "@/lib/knownTokens";
+import { formatTokenAmount, truncateAddress } from "@/lib/format";
 
 const STRATEGY_COLORS = [
   "#3b82f6",
@@ -176,7 +179,72 @@ export function AllocationChart() {
           </li>
         ))}
       </ul>
+
+      <TokenMix underlyingSymbol={symbol} />
     </ChartShell>
+  );
+}
+
+function TokenMix({ underlyingSymbol }: { underlyingSymbol: string }) {
+  const { rows, totalUsd, loading } = useTokenMix();
+  const mints = rows.map((r) => r.mint);
+  const meta = useTokenMetadata(mints);
+  if (rows.length === 0 && !loading) return null;
+  return (
+    <div className="mt-5 border-t border-[var(--color-border)] pt-3">
+      <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+        Token mix (priced via mock-pyth · ≈{underlyingSymbol})
+      </p>
+      {loading && rows.length === 0 ? (
+        <p className="text-xs text-[var(--color-text-muted)]">Loading…</p>
+      ) : (
+        <ul className="space-y-1 text-xs">
+          {rows.map((r) => {
+            const k = r.mint.toBase58();
+            const sym = r.isUnderlying
+              ? underlyingSymbol
+              : meta[k] ?? lookupTokenSymbol(r.mint);
+            const pct =
+              r.usdValue != null && totalUsd > 0
+                ? ((r.usdValue / totalUsd) * 100).toFixed(1)
+                : null;
+            return (
+              <li
+                key={k}
+                className="grid grid-cols-[1fr_auto_auto_auto] items-baseline gap-x-4 tabular-nums whitespace-nowrap"
+              >
+                <span className="min-w-0 truncate text-[var(--color-text-secondary)]">
+                  {sym ?? (
+                    <span className="font-mono">{truncateAddress(k, 4)}</span>
+                  )}
+                </span>
+                <span className="text-right text-[var(--color-text-secondary)]">
+                  {formatTokenAmount(r.totalRaw, r.decimals)}
+                </span>
+                <span className="text-right font-medium">
+                  {r.usdValue != null ? (
+                    <>
+                      <span className="text-[var(--color-text-muted)]">≈</span>
+                      {r.usdValue.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}
+                      <span className="ml-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                        {underlyingSymbol}
+                      </span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </span>
+                <span className="w-10 text-right text-[var(--color-text-muted)]">
+                  {pct ? `${pct}%` : "—"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
