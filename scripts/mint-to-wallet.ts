@@ -27,8 +27,8 @@ import * as fs from "fs";
 // -------------------------------------------------------------------
 // Config — edit these
 // -------------------------------------------------------------------
-const TARGET_WALLET = new PublicKey("8qKtKHeN8hMRLGPXQgBF84CkwC8UPjks4CLuCtLNF2qv");
-const RPC_URL = "https://api.devnet.solana.com";
+const TARGET_WALLET = new PublicKey("EBMe32M7Y6jbPKL9mCCPJ6HreEsxbWn6zzxhsABn8mCB");
+const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
 const WALLET_PATH = "./id.json";
 const MINT_AMOUNT = 1_000_000_000; // 1000 tokens (6 decimals)
 
