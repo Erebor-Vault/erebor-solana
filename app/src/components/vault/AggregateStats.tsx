@@ -7,6 +7,7 @@ import { useVault } from "@/components/providers/VaultProvider";
 import { useVaultProgram } from "@/hooks/useVaultProgram";
 import { deriveVaultPda, deriveShareMintPda, deriveUserAta } from "@/lib/pda";
 import { formatTokenAmount } from "@/lib/format";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpcChunk";
 
 interface Aggregate {
   totalTvl: BN;
@@ -54,7 +55,7 @@ export function AggregateStats() {
       );
       let infos: Awaited<ReturnType<typeof connection.getMultipleAccountsInfo>> = [];
       try {
-        infos = await connection.getMultipleAccountsInfo(keys);
+        infos = await getMultipleAccountsInfoChunked(connection, keys);
       } catch {
         // network failure — render zeros
       }

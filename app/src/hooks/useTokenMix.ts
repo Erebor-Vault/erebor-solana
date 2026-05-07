@@ -9,6 +9,7 @@ import { useVault } from "@/components/providers/VaultProvider";
 import { useStrategies } from "@/hooks/useStrategies";
 import { useVaultProgram } from "@/hooks/useVaultProgram";
 import { deriveStrategyAuthorityPda } from "@/lib/pda";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpcChunk";
 
 const MOCK_PYTH = new PublicKey("2AnSsnWA2W64aAtBEHtouJkotTqXwTSEEvDPfa4YURoq");
 
@@ -99,7 +100,7 @@ export function useTokenMix(): { rows: TokenMixRow[]; totalUsd: number; loading:
           }),
         );
         const allKeys = [...mintKeys, ...feedKeys, ...balanceMatrix.flat()];
-        const infos = await connection.getMultipleAccountsInfo(allKeys, "confirmed");
+        const infos = await getMultipleAccountsInfoChunked(connection, allKeys, "confirmed");
 
         const out: TokenMixRow[] = [];
         for (let i = 0; i < allMints.length; i++) {

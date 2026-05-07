@@ -9,6 +9,7 @@ import { useVault } from "@/components/providers/VaultProvider";
 import { useVaultProgram } from "@/hooks/useVaultProgram";
 import { deriveVaultPda, deriveReserveAta, deriveShareMintPda } from "@/lib/pda";
 import { formatTokenAmount, formatSharePrice, truncateAddress } from "@/lib/format";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpcChunk";
 import { CopyButton } from "@/components/shared/CopyButton";
 import type { VaultEntry } from "@/lib/constants";
 
@@ -44,7 +45,7 @@ export function VaultList() {
       const keys = triples.flatMap((t) => [t.vaultPda, t.shareMint, t.reserveAta]);
       let infos: Awaited<ReturnType<typeof connection.getMultipleAccountsInfo>> = [];
       try {
-        infos = await connection.getMultipleAccountsInfo(keys);
+        infos = await getMultipleAccountsInfoChunked(connection, keys);
       } catch {
         // network failure — leave all entries as nonexistent
       }

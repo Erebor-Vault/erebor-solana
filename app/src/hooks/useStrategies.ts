@@ -6,6 +6,7 @@ import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { useVaultProgram } from "./useVaultProgram";
 import { useVault } from "@/components/providers/VaultProvider";
+import { getMultipleAccountsInfoChunked } from "@/lib/rpcChunk";
 
 export interface StrategyData {
   publicKey: PublicKey;
@@ -54,7 +55,7 @@ export function useStrategies() {
       const tokenAccountKeys = accounts.map(
         (acc: any) => acc.account.tokenAccount as PublicKey
       );
-      const balanceInfos = await connection.getMultipleAccountsInfo(tokenAccountKeys);
+      const balanceInfos = await getMultipleAccountsInfoChunked(connection, tokenAccountKeys);
 
       const strategiesWithBalances = accounts.map((acc: any, i: number) => {
         let actualBalance = new BN(0);
