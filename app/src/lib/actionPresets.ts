@@ -36,6 +36,13 @@ export interface ActionPreset {
    * on-chain by `execute_action`.
    */
   expectedRecipientIndex?: number;
+  /**
+   * Optional pin: index of the output-mint AccountMeta in the relayed
+   * instruction. When set, `execute_action` requires that mint to be on the
+   * protocol-level `AllowedToken` allow-list — the only structural defence
+   * against a delegate routing strategy funds into a non-allow-listed asset.
+   */
+  expectedOutputMintIndex?: number;
   /** Short description shown in the editor. */
   description: string;
   /** Where this entry came from — protocol docs / IDL link. */
@@ -43,12 +50,8 @@ export interface ActionPreset {
 }
 
 const KAMINO_LEND = new PublicKey("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-const MARGINFI_V2 = new PublicKey("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
-const DRIFT_V2 = new PublicKey("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
-const SOLEND = new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 const LULO_LEND = new PublicKey("LFG1ezantSY2LPX8jRz2qa31pPEhpwN9msFDzZw4T9Q");
 const JUPITER_V6 = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
-const RAYDIUM_AMM_V4 = new PublicKey("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
 
 /**
  * Anchor discriminator from a method name. Pre-computed below for the static
@@ -91,76 +94,27 @@ export const ACTION_PRESETS: ActionPreset[] = [
       "Redeem cTokens back to USDC. Recipient index varies by reserve — verify before whitelisting.",
     source: "https://github.com/Kamino-Finance/klend",
   },
-
-  // -----------------------------------------------------------------
-  // Marginfi v2
-  // -----------------------------------------------------------------
   {
-    label: "Marginfi · deposit",
-    protocol: "Marginfi v2",
-    targetProgram: MARGINFI_V2,
-    method: "lending_account_deposit",
-    discriminator: [0xab, 0x5e, 0xeb, 0x67, 0x52, 0x40, 0xd4, 0x8c],
+    label: "Kamino · borrow",
+    protocol: "Kamino Lend",
+    targetProgram: KAMINO_LEND,
+    method: "borrow_obligation_liquidity",
+    discriminator: [0x79, 0x7f, 0x12, 0xcc, 0x49, 0xf5, 0xe1, 0x41],
     expectedRecipientIndex: 4,
-    description: "Deposit into a Marginfi lending account bank.",
-    source: "https://docs.marginfi.com/",
-  },
-  {
-    label: "Marginfi · withdraw",
-    protocol: "Marginfi v2",
-    targetProgram: MARGINFI_V2,
-    method: "lending_account_withdraw",
-    discriminator: [0x24, 0x48, 0x4a, 0x13, 0xd2, 0xd2, 0xc0, 0xc0],
-    description: "Withdraw from a Marginfi lending bank back to the strategy ATA.",
-    source: "https://docs.marginfi.com/",
-  },
-
-  // -----------------------------------------------------------------
-  // Drift v2
-  // -----------------------------------------------------------------
-  {
-    label: "Drift · deposit",
-    protocol: "Drift v2",
-    targetProgram: DRIFT_V2,
-    method: "deposit",
-    discriminator: [0xf2, 0x23, 0xc6, 0x89, 0x52, 0xe1, 0xf2, 0xb6],
-    expectedRecipientIndex: 3,
-    description: "Deposit collateral into a Drift sub-account.",
-    source: "https://drift-labs.github.io/v2-teacher/",
-  },
-  {
-    label: "Drift · withdraw",
-    protocol: "Drift v2",
-    targetProgram: DRIFT_V2,
-    method: "withdraw",
-    discriminator: [0xb7, 0x12, 0x46, 0x9c, 0x94, 0x6d, 0xa1, 0x22],
-    description: "Withdraw collateral from a Drift sub-account.",
-    source: "https://drift-labs.github.io/v2-teacher/",
-  },
-
-  // -----------------------------------------------------------------
-  // Solend
-  // -----------------------------------------------------------------
-  {
-    label: "Solend · deposit",
-    protocol: "Solend",
-    targetProgram: SOLEND,
-    method: "deposit_reserve_liquidity",
-    // Native (non-Anchor) program — first byte is the tag, rest is zero-padded.
-    discriminator: [0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-    expectedRecipientIndex: 1,
     description:
-      "Solend native ix tag 4: deposit reserve liquidity. Tag in byte 0, amount as u64 in ix data.",
-    source: "https://github.com/solendprotocol/solana-program-library",
+      "Borrow against deposited collateral. Strategy ATA receives the borrowed liquidity at index 4.",
+    source: "https://github.com/Kamino-Finance/klend",
   },
   {
-    label: "Solend · withdraw",
-    protocol: "Solend",
-    targetProgram: SOLEND,
-    method: "redeem_reserve_collateral",
-    discriminator: [0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-    description: "Solend native ix tag 5: redeem cToken for underlying.",
-    source: "https://github.com/solendprotocol/solana-program-library",
+    label: "Kamino · repay",
+    protocol: "Kamino Lend",
+    targetProgram: KAMINO_LEND,
+    method: "repay_obligation_liquidity",
+    discriminator: [0x91, 0xb2, 0x0d, 0xe1, 0x4c, 0xf0, 0x93, 0x48],
+    expectedRecipientIndex: 4,
+    description:
+      "Repay borrowed liquidity from the strategy ATA (source token account at index 4).",
+    source: "https://github.com/Kamino-Finance/klend",
   },
 
   // -----------------------------------------------------------------
@@ -187,7 +141,10 @@ export const ACTION_PRESETS: ActionPreset[] = [
   },
 
   // -----------------------------------------------------------------
-  // Jupiter v6 (swap)
+  // Jupiter v6 (swap) — chosen over Raydium AMM v4 because the `route` ix
+  // carries an explicit `destination_mint` AccountMeta we can pin to the
+  // protocol-level `AllowedToken` list. Raydium AMM v4 has no mint meta,
+  // so its swap output cannot be constrained on-chain.
   // -----------------------------------------------------------------
   {
     label: "Jupiter · route",
@@ -195,24 +152,18 @@ export const ACTION_PRESETS: ActionPreset[] = [
     targetProgram: JUPITER_V6,
     method: "route",
     discriminator: [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a],
+    // Jupiter v6 `route` account layout:
+    //   0 token_program
+    //   1 user_transfer_authority
+    //   2 user_source_token_account
+    //   3 user_destination_token_account  ← strategy ATA
+    //   4 destination_token_account (optional / placeholder)
+    //   5 destination_mint               ← must be on AllowedToken list
+    expectedRecipientIndex: 3,
+    expectedOutputMintIndex: 5,
     description:
-      "Multi-hop swap. Inspect each hop carefully — Jupiter routes can include arbitrary AMMs.",
+      "Multi-hop swap. The destination mint is pinned against the vault's AllowedToken list — the delegate cannot route into a non-allow-listed asset.",
     source: "https://station.jup.ag/docs/apis/swap-api",
-  },
-
-  // -----------------------------------------------------------------
-  // Raydium AMM v4
-  // -----------------------------------------------------------------
-  {
-    label: "Raydium · swap",
-    protocol: "Raydium AMM v4",
-    targetProgram: RAYDIUM_AMM_V4,
-    method: "swap_base_in",
-    // Native ix tag.
-    discriminator: [0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-    expectedRecipientIndex: 16,
-    description: "Raydium AMM v4 swap base-in. Strategy ATA appears at the destination index.",
-    source: "https://github.com/raydium-io/raydium-amm",
   },
 ];
 

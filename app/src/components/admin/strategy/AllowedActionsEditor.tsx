@@ -113,6 +113,9 @@ export function AllowedActionsEditor({ strategy, disabled }: Props) {
     setRecipientIdx(
       p.expectedRecipientIndex !== undefined ? String(p.expectedRecipientIndex) : ""
     );
+    setOutputMintIdx(
+      p.expectedOutputMintIndex !== undefined ? String(p.expectedOutputMintIndex) : ""
+    );
   }
 
   async function deriveDiscFromMethod() {
