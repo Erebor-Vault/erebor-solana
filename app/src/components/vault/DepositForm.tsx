@@ -2,25 +2,34 @@
 
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import BN from "bn.js";
 import { useDeposit } from "@/hooks/useDeposit";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { useVault } from "@/components/providers/VaultProvider";
 import { AmountInput } from "@/components/shared/AmountInput";
 import { showTxSuccess, showTxError } from "@/components/shared/TxToast";
-import { parseTokenInput, formatTokenAmount } from "@/lib/format";
+import { parseTokenInput, formatShareAmount } from "@/lib/format";
+
+const VIRTUAL_SHARES = new BN(1_000_000);
 
 export function DepositForm() {
   const { connected } = useWallet();
   const { deposit, loading } = useDeposit();
-  const { sharePrice } = useVault();
+  const { vault, shareSupply } = useVault();
   const { tokenBalance, refresh: refreshPosition } = useUserPosition();
   const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("");
 
   const parsedAmount = parseTokenInput(amount);
+  // Mirror the on-chain formula:
+  //   shares = amount × (supply + VIRTUAL_SHARES) / (assets + 1)
+  // Display via formatShareAmount, which divides by 10^(decimals + 6) to
+  // present the USDC-equivalent (≈1:1 with the deposited amount).
   const estimatedShares = parsedAmount
-    ? parsedAmount.toNumber() / sharePrice
-    : 0;
+    ? parsedAmount
+        .mul(shareSupply.add(VIRTUAL_SHARES))
+        .div((vault?.totalDeposited ?? new BN(0)).add(new BN(1)))
+    : new BN(0);
 
   const handleDeposit = async () => {
     if (!parsedAmount) return;
@@ -51,7 +60,7 @@ export function DepositForm() {
       {parsedAmount && (
         <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
           <span>You will receive</span>
-          <span>~{formatTokenAmount(estimatedShares)} shares</span>
+          <span>~{formatShareAmount(estimatedShares)} shares</span>
         </div>
       )}
 
