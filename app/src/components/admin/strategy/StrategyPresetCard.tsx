@@ -96,7 +96,7 @@ function PresetGlyph({ name }: { name: PresetName }) {
       ? "kamino · looper"
       : name === "lulo_lending"
       ? "lulo"
-      : "raydium · jupiter";
+      : "jupiter";
   return (
     <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
       {tag}

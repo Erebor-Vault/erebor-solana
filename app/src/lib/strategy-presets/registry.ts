@@ -51,12 +51,12 @@ export const PROTOCOL_REGISTRY: ProtocolRegistry = {
             raydium: {
                 programId: null,
                 discriminators: {},
-                note: "No in-workspace swap mock yet. Plan 3 either ships one or routes swap-leg through mock_kamino. Mainnet wiring tracked in FOLLOWUPS A4.",
+                note: "Not used by any preset. Raydium AMM v4 `swap` has no destination-mint AccountMeta, so it cannot be safely registered with outputMintIndex. Tracked in FOLLOWUPS A4 if a future Raydium-specific preset is added.",
             },
             jupiter: {
                 programId: null,
                 discriminators: {},
-                note: "Folded into the Raydium Swapper preset (per spec). Mainnet entry tracked in FOLLOWUPS A4.",
+                note: "Backs the Jupiter Swapper preset. Mainnet entry tracked in FOLLOWUPS A4 (program id: JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4).",
             },
         },
         priceFeeds: [

@@ -33,10 +33,14 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { MyProject } from "../target/types/my_project";
 import { MockKamino } from "../target/types/mock_kamino";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
   mintTo,
+  transfer as splTransfer,
   getAssociatedTokenAddressSync,
+  getOrCreateAssociatedTokenAccount,
+  getMint,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import BN from "bn.js";
@@ -109,6 +113,90 @@ function parseArgs(): Args {
 }
 
 // =============================================================================
+// FAUCET-MODE PROVISIONING (for demo mints whose authority is a PDA)
+// =============================================================================
+
+interface FaucetCtx {
+  program: Program<anchor.Idl>;
+  programId: PublicKey;
+  faucetAuthority: PublicKey;
+  faucetConfig: PublicKey;
+  claimRecord: PublicKey;
+  payerAta: PublicKey;
+  amountPerClaim: BN;
+}
+
+async function buildFaucetCtx(
+  provider: anchor.AnchorProvider,
+  payer: Keypair,
+  tokenMint: PublicKey,
+): Promise<FaucetCtx> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const idl = JSON.parse(fs.readFileSync("./target/idl/demo_faucet.json", "utf-8"));
+  const programId = new PublicKey(idl.address);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const program = new anchor.Program(idl as any, provider) as Program<anchor.Idl>;
+  const [faucetAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("faucet_authority"), tokenMint.toBuffer()],
+    programId,
+  );
+  const [faucetConfig] = PublicKey.findProgramAddressSync(
+    [Buffer.from("faucet_config"), tokenMint.toBuffer()],
+    programId,
+  );
+  const [claimRecord] = PublicKey.findProgramAddressSync(
+    [Buffer.from("claim"), tokenMint.toBuffer(), payer.publicKey.toBuffer()],
+    programId,
+  );
+  // Read amount_per_claim from on-chain config so cooldown sizing matches.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = await (program.account as any).faucetConfig.fetch(faucetConfig);
+  const payerAta = (await getOrCreateAssociatedTokenAccount(
+    provider.connection, payer, tokenMint, payer.publicKey,
+  )).address;
+  return {
+    program, programId, faucetAuthority, faucetConfig, claimRecord, payerAta,
+    amountPerClaim: new BN(cfg.amountPerClaim.toString()),
+  };
+}
+
+async function topUpFromFaucet(
+  fctx: FaucetCtx,
+  payer: Keypair,
+  tokenMint: PublicKey,
+  needed: number,
+): Promise<void> {
+  const conn = fctx.program.provider.connection;
+  const bal = await conn
+    .getTokenAccountBalance(fctx.payerAta)
+    .then((r) => Number(r.value.amount))
+    .catch(() => 0);
+  if (bal >= needed) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (fctx.program.methods as any)
+      .claim()
+      .accountsStrict({
+        recipient: payer.publicKey,
+        mint: tokenMint,
+        faucetConfig: fctx.faucetConfig,
+        faucetAuthority: fctx.faucetAuthority,
+        recipientAta: fctx.payerAta,
+        claimRecord: fctx.claimRecord,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    console.log(`  faucet claim: +${(fctx.amountPerClaim.toNumber() / 1e6).toFixed(2)} into payer ATA`);
+  } catch (err) {
+    // Cooldown is normal in --loop; surface only unexpected failures.
+    const msg = (err as { message?: string })?.message ?? String(err);
+    if (!/Cooldown/i.test(msg)) console.warn(`  faucet claim skipped: ${msg}`);
+  }
+}
+
+// =============================================================================
 // PER-STRATEGY report_yield
 // =============================================================================
 
@@ -118,7 +206,8 @@ async function crankReportYield(
   payer: Keypair,
   vaultPda: PublicKey,
   tokenMint: PublicKey,
-  yieldBps: number
+  yieldBps: number,
+  fctx: FaucetCtx | null,
 ): Promise<number> {
   const vault = await program.account.vaultState.fetch(vaultPda);
   const strategyCount = vault.strategyCount.toNumber();
@@ -156,7 +245,17 @@ async function crankReportYield(
     const yieldAmount = Math.floor((allocated * yieldBps) / 10_000);
     if (yieldAmount <= 0) continue;
 
-    await mintTo(connection, payer, tokenMint, strategy.tokenAccount, payer, yieldAmount);
+    if (fctx) {
+      // Faucet-managed mint: top up payer ATA via claim, then SPL-transfer
+      // into the strategy ATA. Plain mintTo would fail OwnerMismatch because
+      // the mint authority is the faucet PDA.
+      await topUpFromFaucet(fctx, payer, tokenMint, yieldAmount);
+      await splTransfer(
+        connection, payer, fctx.payerAta, strategy.tokenAccount, payer, yieldAmount,
+      );
+    } else {
+      await mintTo(connection, payer, tokenMint, strategy.tokenAccount, payer, yieldAmount);
+    }
 
     await program.methods
       .reportYield()
@@ -249,8 +348,15 @@ async function crankOnce(args: Args): Promise<void> {
   );
 
   if (!args.noReportYield) {
+    // If the mint authority isn't the payer (e.g. demo dUSDC, whose authority
+    // is the demo_faucet PDA), route the per-strategy top-up through the
+    // faucet's `claim` + an SPL transfer. Otherwise stay on the fast path.
+    const mintInfo = await getMint(connection, tokenMint);
+    const authIsPayer = !!mintInfo.mintAuthority?.equals(payer.publicKey);
+    const fctx = authIsPayer ? null : await buildFaucetCtx(provider, payer, tokenMint);
+    if (fctx) console.log(`  faucet mode (mint authority ${mintInfo.mintAuthority?.toBase58()})`);
     console.log("[report_yield] crank...");
-    await crankReportYield(vaultProgram, connection, payer, vaultPda, tokenMint, args.yieldBps);
+    await crankReportYield(vaultProgram, connection, payer, vaultPda, tokenMint, args.yieldBps, fctx);
   }
 
   if (args.simulateKamino > 0) {

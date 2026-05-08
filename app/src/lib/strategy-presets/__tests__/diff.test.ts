@@ -3,7 +3,7 @@ import { PublicKey, Connection, Keypair } from "@solana/web3.js";
 import BN from "bn.js";
 import * as anchor from "@coral-xyz/anchor";
 import { diffRowSets, snapshotToRows, detectActivePreset, RowId } from "../diff";
-import { PRESETS, KAMINO_LIQUIDITY, LULO_LENDING, RAYDIUM_SWAPPER } from "../presets";
+import { PRESETS, KAMINO_LIQUIDITY, LULO_LENDING, JUPITER_SWAPPER } from "../presets";
 import myProjectIdl from "../../../idl/my_project.json";
 import type { MyProject } from "../../../idl/my_project";
 
@@ -72,9 +72,9 @@ describe("diff engine", () => {
             kamino_liquidity: liquidityRows,
             kamino_looper: await PRESETS.find((p) => p.name === "kamino_looper")!.buildRows(ctx),
             lulo_lending: luloRows,
-            // Raydium throws on empty allow-list — pass empty rows so it
+            // Jupiter Swapper throws on empty allow-list — pass empty rows so it
             // never matches anything other than an empty strategy.
-            raydium_swapper: [] as RowId[],
+            jupiter_swapper: [] as RowId[],
         };
 
         // Build a synthetic StrategySnapshot from liquidityRows.
@@ -108,7 +108,7 @@ describe("diff engine", () => {
                 kamino_liquidity: [],
                 kamino_looper: [],
                 lulo_lending: [],
-                raydium_swapper: [],
+                jupiter_swapper: [],
             },
         );
         expect(detected).to.equal("Custom");

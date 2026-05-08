@@ -77,7 +77,7 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
     kamino_liquidity: [],
     kamino_looper: [],
     lulo_lending: [],
-    raydium_swapper: [],
+    jupiter_swapper: [],
   });
 
   // Stable synthetic obligation for detection — generated once per card mount.
@@ -115,7 +115,7 @@ export function StrategyCard({ strategy, onRefresh }: Props) {
           kamino_liquidity: [],
           kamino_looper: [],
           lulo_lending: [],
-          raydium_swapper: [],
+          jupiter_swapper: [],
         };
         PRESETS.forEach((p, i) => {
           byName[p.name] = rowsArr[i];

@@ -155,7 +155,7 @@ export async function buildValueSourceIx(
 
 /**
  * Read every `VaultAllowedToken` PDA owned by `programId` for the given
- * vault. Used by the Raydium Swapper preset to enumerate which mints
+ * vault. Used by the Jupiter Swapper preset to enumerate which mints
  * the curator has allow-listed for swapping.
  */
 export async function getVaultAllowedTokens(

@@ -81,7 +81,7 @@ function Inner() {
     kamino_liquidity: [],
     kamino_looper: [],
     lulo_lending: [],
-    raydium_swapper: [],
+    jupiter_swapper: [],
   });
 
   const syntheticObligation = useRef(Keypair.generate().publicKey).current;
@@ -114,7 +114,7 @@ function Inner() {
         kamino_liquidity: [],
         kamino_looper: [],
         lulo_lending: [],
-        raydium_swapper: [],
+        jupiter_swapper: [],
       };
       PRESETS.forEach((p, i) => { byName[p.name] = rowsArr[i]; });
       setPresetRowsByName(byName);

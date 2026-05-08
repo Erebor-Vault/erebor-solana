@@ -27,7 +27,7 @@ export type PresetName =
     | "kamino_liquidity"
     | "kamino_looper"
     | "lulo_lending"
-    | "raydium_swapper";
+    | "jupiter_swapper";
 
 export interface PresetBuildContext {
     connection: Connection;
@@ -50,7 +50,7 @@ export interface PresetBuildContext {
     /** Required for Kamino Liquidity / Kamino Looper presets. The
      *  Kamino obligation account whose `deposits[reserve_index]
      *  .deposited_amount` field the AccountU64 value source reads.
-     *  Optional because Lulo / Raydium presets ignore it. */
+     *  Optional because Lulo / Jupiter presets ignore it. */
     kaminoObligation?: PublicKey;
     /** Byte offset inside `kaminoObligation` where the deposited
      *  cToken amount lives. Defaults to 184 (Kamino's
@@ -72,7 +72,7 @@ export interface StrategyPreset {
 }
 
 const KAMINO_LIQUIDITY_LOSS_BPS = 100; // 1%
-const RAYDIUM_SWAP_LOSS_BPS = 50; // 0.5%
+const JUPITER_SWAP_LOSS_BPS = 50; // 0.5%
 const PYTH_MAX_STALENESS_SECS = 60;
 
 function disc(name: string): number[] {
@@ -176,21 +176,26 @@ async function kaminoLiquiditySpec(ctx: PresetBuildContext): Promise<PresetBundl
 }
 
 // ============================================================
-// RAYDIUM SWAPPER spec
+// JUPITER SWAPPER spec
 // ============================================================
-
-async function raydiumSwapperSpec(ctx: PresetBuildContext): Promise<PresetBundleSpec> {
+//
+// Jupiter v6 `route` is the only mainstream Solana swap that exposes
+// `destination_mint` as an explicit AccountMeta — required for the
+// vault's on-chain `output_mint_index` check against the
+// `AllowedToken` allow-list. Raydium AMM v4 has no destination-mint
+// meta and so cannot be safely registered with `outputMintIndex`.
+async function jupiterSwapperSpec(ctx: PresetBuildContext): Promise<PresetBundleSpec> {
     const reg = PROTOCOL_REGISTRY[ctx.cluster];
     const allowedActions: AllowedActionSpec[] = [];
 
-    for (const proto of ["raydium", "jupiter"] as const) {
-        const entry = reg.protocols[proto];
-        if (!entry.programId) continue;
+    const jupiter = reg.protocols.jupiter;
+    if (jupiter.programId) {
         allowedActions.push({
-            targetProgram: entry.programId,
-            discriminator: disc("swap"),
-            lossPerCallBpsCap: RAYDIUM_SWAP_LOSS_BPS,
-            outputMintIndex: 1,
+            targetProgram: jupiter.programId,
+            discriminator: disc("route"),
+            lossPerCallBpsCap: JUPITER_SWAP_LOSS_BPS,
+            // Jupiter v6 `route` account layout: destination_mint at index 5.
+            outputMintIndex: 5,
         });
     }
 
@@ -201,17 +206,17 @@ async function raydiumSwapperSpec(ctx: PresetBuildContext): Promise<PresetBundle
     );
     if (allowedMints.length === 0) {
         throw new Error(
-            "Raydium Swapper preset requires at least one VaultAllowedToken on the vault.",
+            "Jupiter Swapper preset requires at least one VaultAllowedToken on the vault.",
         );
     }
     if (allowedMints.length > 8) {
         throw new Error(
-            `Raydium Swapper preset can price up to 8 mints (got ${allowedMints.length}). Trim the vault allow-list or extend MAX_VALUE_SOURCES_PER_STRATEGY.`,
+            `Jupiter Swapper preset can price up to 8 mints (got ${allowedMints.length}). Trim the vault allow-list or extend MAX_VALUE_SOURCES_PER_STRATEGY.`,
         );
     }
     if (!reg.mockPythProgramId) {
         throw new Error(
-            `Raydium Swapper preset needs a price-feed program; ${ctx.cluster} has no mockPythProgramId in PROTOCOL_REGISTRY.`,
+            `Jupiter Swapper preset needs a price-feed program; ${ctx.cluster} has no mockPythProgramId in PROTOCOL_REGISTRY.`,
         );
     }
 
@@ -496,20 +501,20 @@ export const LULO_LENDING: StrategyPreset = {
 };
 
 // ============================================================
-// RAYDIUM SWAPPER
+// JUPITER SWAPPER
 // ============================================================
 
-export const RAYDIUM_SWAPPER: StrategyPreset = {
-    name: "raydium_swapper",
-    label: "Raydium Swapper",
+export const JUPITER_SWAPPER: StrategyPreset = {
+    name: "jupiter_swapper",
+    label: "Jupiter Swapper",
     summary:
-        "Swap among allow-listed mints (Raydium + Jupiter on mainnet). NAV from balance × Pyth price per allow-listed mint.",
+        "Swap among allow-listed mints via Jupiter v6 `route` (destination mint pinned to AllowedToken list). NAV from balance × Pyth price per allow-listed mint.",
     async buildIxs(ctx) {
-        const spec = await raydiumSwapperSpec(ctx);
+        const spec = await jupiterSwapperSpec(ctx);
         return specToIxs(ctx, spec);
     },
     async buildRows(ctx) {
-        const spec = await raydiumSwapperSpec(ctx);
+        const spec = await jupiterSwapperSpec(ctx);
         return specToRows(spec);
     },
 };
@@ -518,12 +523,12 @@ export const PRESETS: StrategyPreset[] = [
     KAMINO_LIQUIDITY,
     KAMINO_LOOPER,
     LULO_LENDING,
-    RAYDIUM_SWAPPER,
+    JUPITER_SWAPPER,
 ];
 
 export const PRESETS_BY_NAME: Record<PresetName, StrategyPreset> = {
     kamino_liquidity: KAMINO_LIQUIDITY,
     kamino_looper: KAMINO_LOOPER,
     lulo_lending: LULO_LENDING,
-    raydium_swapper: RAYDIUM_SWAPPER,
+    jupiter_swapper: JUPITER_SWAPPER,
 };

@@ -7,7 +7,7 @@ import {
     KAMINO_LIQUIDITY,
     KAMINO_LOOPER,
     LULO_LENDING,
-    RAYDIUM_SWAPPER,
+    JUPITER_SWAPPER,
 } from "../presets";
 import myProjectIdl from "../../../idl/my_project.json";
 import type { MyProject } from "../../../idl/my_project";
@@ -96,14 +96,14 @@ describe("preset bundle snapshots (devnet)", () => {
         expect(ixs.length).to.equal(4);
     });
 
-    it("RAYDIUM_SWAPPER throws when vault has no allow-listed mints", async () => {
+    it("JUPITER_SWAPPER throws when vault has no allow-listed mints", async () => {
         // Intentional: the preset requires at least 1 mint in the vault
-        // allow-list. The Raydium Swapper's snapshot live-test runs in
+        // allow-list. The Jupiter Swapper's snapshot live-test runs in
         // the e2e suite (Task 11) where a vault with allow-listed mints
         // is bootstrapped; here we assert the guard.
         let err: Error | null = null;
         try {
-            await RAYDIUM_SWAPPER.buildIxs(deterministicCtx());
+            await JUPITER_SWAPPER.buildIxs(deterministicCtx());
         } catch (e: any) {
             err = e;
         }
