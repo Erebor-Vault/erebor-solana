@@ -8,7 +8,7 @@ Think of it as an ERC-4626-style vault designed specifically for AI agent strate
 
 > Named after the legendary dwarven treasury under the Lonely Mountain — one impenetrable home for AI-managed capital.
 
-**Live app:** https://ereborvault.netlify.app/
+**Live app:** https://erebor-gold.vercel.app/
 
 **Explorer:** [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet)
 
@@ -251,7 +251,7 @@ bun run start
 | Program ID (devnet) | `DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B` |
 | Upgrade Authority | `4wrBiaNfvvk8nEoePJ94ceBa2APanrfjPyoWbjZYu9fn` |
 | Cluster | devnet |
-| Frontend | https://ereborvault.netlify.app/ |
+| Frontend | https://erebor-gold.vercel.app/ |
 | Explorer | [View on Solana Explorer](https://explorer.solana.com/address/DXcUni7VCBiLA8MEa2cB4nektLT33Dth62skuiyuwm5B?cluster=devnet) |
 
 ## Roadmap
